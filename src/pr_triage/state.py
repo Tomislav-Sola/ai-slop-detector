@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -43,7 +43,7 @@ class TriageState(BaseModel):
     # Identity
     repo: str
     pr_number: int
-    fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
     # Phase 1: ingested GitHub data
     metadata: PRMetadata
