@@ -35,30 +35,30 @@ def _make_state() -> TriageState:
 
 
 # Single-command Typer apps are invoked without the command name:
-# runner.invoke(app, ["owner/repo", "7"])  — not ["fetch", "owner/repo", "7"]
+# fetch is a proper subcommand: runner.invoke(app, ["fetch", "owner/repo", "7"])
 
 
 def test_fetch_missing_token_exits_nonzero():
     with patch.dict(os.environ, {"GITHUB_TOKEN": ""}):
-        result = runner.invoke(app, ["owner/repo", "1"])
+        result = runner.invoke(app, ["fetch", "owner/repo", "1"])
     assert result.exit_code == 1
 
 
 def test_fetch_missing_token_error_message():
     with patch.dict(os.environ, {"GITHUB_TOKEN": ""}):
-        result = runner.invoke(app, ["owner/repo", "1"])
+        result = runner.invoke(app, ["fetch", "owner/repo", "1"])
     assert "GITHUB_TOKEN" in result.output
 
 
 def test_fetch_bad_repo_format_exits_nonzero():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
-        result = runner.invoke(app, ["noslash", "1"])
+        result = runner.invoke(app, ["fetch", "noslash", "1"])
     assert result.exit_code == 1
 
 
 def test_fetch_bad_repo_format_error_message():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
-        result = runner.invoke(app, ["noslash", "1"])
+        result = runner.invoke(app, ["fetch", "noslash", "1"])
     assert "owner/repo" in result.output
 
 
@@ -67,7 +67,7 @@ def test_fetch_happy_path_exits_zero():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
         with patch("pr_triage.cli.GitHubClient") as mock_cls:
             mock_cls.return_value.fetch_pr.return_value = state
-            result = runner.invoke(app, ["owner/repo", "7"])
+            result = runner.invoke(app, ["fetch", "owner/repo", "7"])
     assert result.exit_code == 0
 
 
@@ -76,7 +76,7 @@ def test_fetch_happy_path_outputs_valid_json():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
         with patch("pr_triage.cli.GitHubClient") as mock_cls:
             mock_cls.return_value.fetch_pr.return_value = state
-            result = runner.invoke(app, ["owner/repo", "7"])
+            result = runner.invoke(app, ["fetch", "owner/repo", "7"])
     data = json.loads(result.output)
     assert data["repo"] == "owner/repo"
     assert data["pr_number"] == 7
@@ -88,7 +88,7 @@ def test_fetch_happy_path_passes_token_to_client():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "secret-token"}):
         with patch("pr_triage.cli.GitHubClient") as mock_cls:
             mock_cls.return_value.fetch_pr.return_value = state
-            runner.invoke(app, ["owner/repo", "7"])
+            runner.invoke(app, ["fetch", "owner/repo", "7"])
     mock_cls.assert_called_once_with(token="secret-token")
 
 
@@ -97,5 +97,5 @@ def test_fetch_happy_path_passes_pr_number_to_client():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
         with patch("pr_triage.cli.GitHubClient") as mock_cls:
             mock_cls.return_value.fetch_pr.return_value = state
-            runner.invoke(app, ["owner/repo", "7"])
+            runner.invoke(app, ["fetch", "owner/repo", "7"])
     mock_cls.return_value.fetch_pr.assert_called_once_with("owner/repo", 7)

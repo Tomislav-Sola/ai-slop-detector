@@ -13,6 +13,11 @@ load_dotenv()
 app = typer.Typer(help="PR triage CLI for OSS maintainers.")
 
 
+@app.callback()
+def main() -> None:
+    """PR triage CLI for OSS maintainers."""
+
+
 @app.command()
 def fetch(
     repo: str = typer.Argument(..., help="GitHub repo in owner/repo format"),
