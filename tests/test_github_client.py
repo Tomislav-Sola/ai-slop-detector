@@ -67,15 +67,15 @@ def _make_mock_repo_and_pr(fixture: dict) -> tuple[MagicMock, MagicMock]:
 
 
 @pytest.fixture
-def fake_github_client(papertriage_pr1):
+def fake_github_client(papertriage_pr9):
     """GitHubClient with PyGithub patched using fixture data."""
-    mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr1)
+    mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr9)
 
     with patch("pr_triage.github_client.Github") as mock_gh_class:
         mock_gh_class.return_value.get_repo.return_value = mock_repo
         with patch("pr_triage.github_client._fetch_diff") as mock_diff:
-            mock_diff.return_value = papertriage_pr1["raw_diff"]
-            yield GitHubClient(token="fake-token"), papertriage_pr1
+            mock_diff.return_value = papertriage_pr9["raw_diff"]
+            yield GitHubClient(token="fake-token"), papertriage_pr9
 
 
 def test_fetch_pr_fake_returns_triage_state(fake_github_client):
@@ -139,8 +139,8 @@ def test_fetch_pr_fake_phase2_fields_empty(fake_github_client):
     assert state.confidence_score is None
 
 
-def test_fetch_pr_contributing_md_present(papertriage_pr1):
-    mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr1)
+def test_fetch_pr_contributing_md_present(papertriage_pr9):
+    mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr9)
 
     contributing_text = "# Contributing\n\nPlease open an issue first."
     mock_content = MagicMock()
@@ -159,17 +159,17 @@ def test_fetch_pr_contributing_md_present(papertriage_pr1):
         mock_gh_class.return_value.get_repo.return_value = mock_repo
         with patch("pr_triage.github_client._fetch_diff", return_value=None):
             client = GitHubClient(token="fake-token")
-            state = client.fetch_pr(papertriage_pr1["repo"], papertriage_pr1["pr_number"])
+            state = client.fetch_pr(papertriage_pr9["repo"], papertriage_pr9["pr_number"])
 
     assert state.contributing_md == contributing_text
     assert state.agents_md is None
 
 
-def test_author_prior_prs_excludes_current_pr(papertriage_pr1):
-    mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr1)
+def test_author_prior_prs_excludes_current_pr(papertriage_pr9):
+    mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr9)
 
-    author = papertriage_pr1["pr"]["user_login"]
-    current = papertriage_pr1["pr_number"]
+    author = papertriage_pr9["pr"]["user_login"]
+    current = papertriage_pr9["pr_number"]
 
     def _mock_pr(number, login):
         m = MagicMock()
@@ -196,6 +196,6 @@ def test_author_prior_prs_excludes_current_pr(papertriage_pr1):
         mock_gh_class.return_value.get_repo.return_value = mock_repo
         with patch("pr_triage.github_client._fetch_diff", return_value=None):
             client = GitHubClient(token="fake-token")
-            state = client.fetch_pr(papertriage_pr1["repo"], papertriage_pr1["pr_number"])
+            state = client.fetch_pr(papertriage_pr9["repo"], papertriage_pr9["pr_number"])
 
     assert state.author_prior_prs == 1

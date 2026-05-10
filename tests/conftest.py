@@ -21,6 +21,6 @@ def use_fake(request: pytest.FixtureRequest) -> bool:
 
 
 @pytest.fixture
-def papertriage_pr1() -> dict:
-    with open(FIXTURES_DIR / "papertriage_pr1.json") as f:
+def papertriage_pr9() -> dict:
+    with open(FIXTURES_DIR / "papertriage_pr9.json") as f:
         return json.load(f)

@@ -34,6 +34,7 @@ def _fetch_file(repo: Repository, candidates: list[str]) -> str | None:
 class GitHubClient:
     def __init__(self, token: str) -> None:
         self._gh = Github(token)
+        self._token = token
 
     def fetch_pr(
         self,
@@ -65,7 +66,7 @@ class GitHubClient:
 
         files_changed = [f.filename for f in pr.get_files()]
 
-        raw_diff = _fetch_diff(pr)
+        raw_diff = _fetch_diff(pr, self._token)
 
         author_prior_prs = _count_author_prs(repo, pr.user.login, exclude_pr=pr_number)
 
@@ -88,14 +89,14 @@ class GitHubClient:
         )
 
 
-def _fetch_diff(pr: PullRequest) -> str | None:
+def _fetch_diff(pr: PullRequest, token: str | None = None) -> str | None:
     try:
         import urllib.request
 
-        req = urllib.request.Request(
-            pr.diff_url,
-            headers={"Accept": "application/vnd.github.v3.diff"},
-        )
+        headers = {"Accept": "application/vnd.github.v3.diff"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(pr.diff_url, headers=headers)
         with urllib.request.urlopen(req) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except Exception:

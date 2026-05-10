@@ -99,6 +99,6 @@ if __name__ == "__main__":
 
     repo_arg = sys.argv[1]
     pr_arg = int(sys.argv[2])
-    out_arg = Path(sys.argv[3]) if len(sys.argv) > 3 else Path("tests/fixtures/papertriage_pr1.json")
+    out_arg = Path(sys.argv[3]) if len(sys.argv) > 3 else Path("tests/fixtures/papertriage_pr9.json")
 
     capture(repo_arg, pr_arg, out_arg)
