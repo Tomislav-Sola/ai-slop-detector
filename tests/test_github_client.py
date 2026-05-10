@@ -137,3 +137,65 @@ def test_fetch_pr_fake_phase2_fields_empty(fake_github_client):
     assert state.aggregate_verdict is None
     assert state.rag_chunks == []
     assert state.confidence_score is None
+
+
+def test_fetch_pr_contributing_md_present(papertriage_pr1):
+    mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr1)
+
+    contributing_text = "# Contributing\n\nPlease open an issue first."
+    mock_content = MagicMock()
+    mock_content.decoded_content = contributing_text.encode()
+
+    from github import GithubException
+
+    def get_contents(name):
+        if name == "CONTRIBUTING.md":
+            return mock_content
+        raise GithubException(404, "not found")
+
+    mock_repo.get_contents.side_effect = get_contents
+
+    with patch("pr_triage.github_client.Github") as mock_gh_class:
+        mock_gh_class.return_value.get_repo.return_value = mock_repo
+        with patch("pr_triage.github_client._fetch_diff", return_value=None):
+            client = GitHubClient(token="fake-token")
+            state = client.fetch_pr(papertriage_pr1["repo"], papertriage_pr1["pr_number"])
+
+    assert state.contributing_md == contributing_text
+    assert state.agents_md is None
+
+
+def test_author_prior_prs_excludes_current_pr(papertriage_pr1):
+    mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr1)
+
+    author = papertriage_pr1["pr"]["user_login"]
+    current = papertriage_pr1["pr_number"]
+
+    def _mock_pr(number, login):
+        m = MagicMock()
+        m.number = number
+        m.user.login = login
+        m.merged = True
+        m.title = f"PR #{number}"
+        return m
+
+    all_prs = [
+        _mock_pr(current, author),       # current PR — must be excluded
+        _mock_pr(current - 1, author),   # prior PR by same author — counts
+        _mock_pr(current - 2, "other"),  # different author — does not count
+    ]
+
+    def get_pulls_side_effect(*args, **kwargs):
+        if kwargs.get("state") == "all":
+            return all_prs
+        return [p for p in all_prs if p.merged]
+
+    mock_repo.get_pulls.side_effect = get_pulls_side_effect
+
+    with patch("pr_triage.github_client.Github") as mock_gh_class:
+        mock_gh_class.return_value.get_repo.return_value = mock_repo
+        with patch("pr_triage.github_client._fetch_diff", return_value=None):
+            client = GitHubClient(token="fake-token")
+            state = client.fetch_pr(papertriage_pr1["repo"], papertriage_pr1["pr_number"])
+
+    assert state.author_prior_prs == 1
