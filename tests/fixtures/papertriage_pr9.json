@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "source": "Tomislav-Sola/papertriage PR #9 (real capture 2026-05-10)",
+    "note": "Refresh via: python scripts/capture_fixture.py Tomislav-Sola/papertriage 9"
+  },
+  "repo": "Tomislav-Sola/papertriage",
+  "pr_number": 9,
+  "pr": {
+    "number": 9,
+    "title": "V3: Interactive review + knowledge graph",
+    "body": "## Summary\r\n\r\n- **Interactive review UI** — Papers tab gets a per-paper Include/Exclude toggle, reviewer notes, and a full details expander (problem, method, contributions, key results, datasets, limitations). Clusters tab gets inline editable labels. All changes are persisted immediately to `outputs/<run_id>/review.json`.\r\n- **Regenerate flow** — new `papertriage regenerate <run_id>` command and viewer button reruns only synthesize + critique with review overrides applied (excluded papers filtered out, cluster labels replaced). Output lands in `outputs/<run_id>/regenerated_<timestamp>/`; the original run is never modified. Inherits the original run's critic mode from `meta.json`.\r\n- **Knowledge graph** — `src/papertriage/graph/builder.py` builds a NetworkX cosine-similarity graph from embeddings and renders it as a self-contained pyvis HTML file.\r\n",
+    "user_login": "Tomislav-Sola",
+    "created_at": "2026-05-10T12:00:43Z",
+    "updated_at": "2026-05-10T12:02:07Z",
+    "base_ref": "main",
+    "head_ref": "v3-review-and-graph",
+    "additions": 959,
+    "deletions": 67,
+    "changed_files": 14,
+    "labels": ["bug", "documentation", "enhancement"],
+    "draft": false,
+    "merged": true,
+    "mergeable": null,
+    "diff_url": "https://github.com/Tomislav-Sola/papertriage/pull/9.diff"
+  },
+  "files_changed": [
+    ".gitignore",
+    "README.md",
+    "pyproject.toml",
+    "src/papertriage/cli/main.py",
+    "src/papertriage/cluster/embedding.py",
+    "src/papertriage/extract/extractor.py",
+    "src/papertriage/graph/__init__.py",
+    "src/papertriage/graph/builder.py",
+    "src/papertriage/orchestration/context.py",
+    "src/papertriage/orchestration/pipeline.py",
+    "src/papertriage/orchestration/regenerate.py",
+    "tests/unit/test_regenerate.py",
+    "viewer/app.py",
+    "viewer/state.py"
+  ],
+  "raw_diff": "diff --git a/.gitignore b/.gitignore\nindex 456ab7b..c34a79f 100644\n--- a/.gitignore\n+++ b/.gitignore\n@@ -29,4 +29,7 @@ test_papers/\n # OS / editor\n .DS_Store\n .idea/\n-.vscode/\n\\ No newline at end of file\n+.vscode/\n+\n+# pyvis JS bundles written alongside the script that calls save_graph()\n+lib/\n\\ No newline at end of file\ndiff --git a/pyproject.toml b/pyproject.toml\nindex 8bb834e..f768185 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -4,7 +4,7 @@ build-backend = \"setuptools.build_meta\"\n \n [project]\n name = \"papertriage\"\n-version = \"0.3.0\"\n+version = \"0.4.0\"\n",
+  "author_prior_prs": 8,
+  "contributing_md": null,
+  "agents_md": null,
+  "recent_merged_titles": [
+    "V3: Interactive review + knowledge graph",
+    "V2: embedding clusterer + multi-agent critique",
+    "feat: arXiv adapter, extraction caching, and bug fixes (v0.2.0)",
+    "docs: add shield badges for Python version, license, coverage and status",
+    "Portfolio polish: MIT license, example run output, viewer screenshots",
+    "chore: remove hello.py smoke-test artifact",
+    "Phase 3: Viewer, Evals, README, plus targeted fixes",
+    "Phase 2: Pipeline — clustering, synthesis, critique, orchestration, CLI",
+    "Phase 1: Foundation — scaffolding, LLM client, extraction pipeline"
+  ]
+}
