@@ -59,3 +59,75 @@ separate `bot_comments` field and excluded from `issue_comments`. This keeps
 ## Sources
 
 See [SOURCES.md](SOURCES.md) for the actual repos and PR numbers included.
+
+## Class definitions with calibration examples
+
+Each class has one anchor example with the actual PR URL and a brief
+explanation of why it belongs to that class. These cases were manually
+verified during candidate inspection and are referenced for critic
+calibration. If a future critic mis-classifies any of these anchors,
+the critic is fundamentally broken.
+
+### accepted
+
+**Anchor: [astral-sh/ruff#24960](https://github.com/astral-sh/ruff/pull/24960)**
+- Author: MichaReiser (MEMBER, ~1000 prior PRs)
+- +601 / -322 across 12 files, merged after ~13 days
+- Substantial refactor with clear technical writeup in PR body
+- 9 inline review comments, 3 issue comments — real maintainer engagement
+- Tests added, multi-commit structure, linked cross-repo issue (astral-sh/ty#1950)
+- Why accepted: substantive contribution from a core maintainer, full
+  technical discussion, clean merge.
+
+**Second anchor (zero-comment accepted): [ghostty-org/ghostty#12518](https://github.com/ghostty-org/ghostty/pull/12518)**
+- Author: knu (CONTRIBUTOR, 2 prior PRs)
+- +91 / -11, merged within ~24h
+- Zero comments on PR, but body explicitly discloses AI use:
+  "AI usage: OpenAI Codex helped investigate, implement, test, and refine
+  this change. I reviewed and tested the resulting code."
+- References a vouched discussion issue (#12169)
+- Tests added with 8 parametrised cases including edge cases
+- Why accepted: correctly disclosed AI-assisted contribution, followed
+  Ghostty's vouch process, technically sound. Critical calibration case:
+  prevents the critic from learning "any AI disclosure = slop". The signal
+  is disclosure quality and review evidence, not the presence of the word AI.
+
+### rejected_quality
+
+*(To be filled in during labeling with one verified example.)*
+
+### slop
+
+**Anchor: [ghostty-org/ghostty#10515](https://github.com/ghostty-org/ghostty/pull/10515)**
+- Author: mvanhorn (NONE, 1 prior PR)
+- +345 / -0 across 4 files, closed in 13 minutes by Mitchell Hashimoto
+- PR body footer: "Generated with Claude Code" and "Co-Authored-By: Claude"
+- Closing maintainer comment cites the AI policy verbatim:
+  "as noted by the AI policy, any AI assisted PRs need to be an accepted
+  issue not random PRs"
+  "Closing this due to violating our policies. There was a lot of failure
+  to read the instructions here which is highly questionable"
+- The PR implemented an SCP/ControlMaster image-paste hack for a problem
+  that is already solved by an established protocol (OSC 5522), which the
+  submitter himself acknowledged after the close:
+  "My SCP/ControlMaster approach works but it's definitely a hack"
+- Why slop: pure-add (+345/-0), undisclosed AI generation that violated
+  stated policy, reinvented an existing protocol, closed in minutes by
+  the owner with explicit policy citation. Triggers all three slop
+  sub-patterns: ai_disclosure_or_mention (Claude footer),
+  maintainer_explicit_rejection (policy citation), and structural slop
+  signals (large pure-add for already-solved problem).
+
+**Second anchor (silent-slop variant): [pydantic/pydantic#13100](https://github.com/pydantic/pydantic/pull/13100)**
+*(verify during labeling — likely fits the silent-slop pattern: first-time
+author, substantive diff, closed unmerged with zero comments)*
+
+### Anti-anchors (what NOT to classify as slop)
+
+**[ghostty-org/ghostty#12518](https://github.com/ghostty-org/ghostty/pull/12518)** — already cited under accepted above.
+Disclosed AI use that was merged. The critic must distinguish this from #10515.
+
+**[tldraw/tldraw#8671](https://github.com/tldraw/tldraw/pull/8671)** — author steveruizok (Founder, >1000 prior PRs),
++0 / -3, no comments, closed unmerged. This is a maintainer cleanup PR
+abandoned for unknown reasons, NOT slop. Critics should treat
+closed-unmerged maintainer-authored PRs differently from contributor PRs.
