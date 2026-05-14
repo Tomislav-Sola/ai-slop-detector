@@ -6,31 +6,38 @@ This is portfolio project #2, built in public.
 
 ## What this is
 
-`pr-triage fetch <owner/repo> <pr_number>` fetches a pull request from GitHub and prints a structured `TriageState` JSON — PR metadata, diff, files changed, author history, and repo contribution guidelines. Later phases will run critic agents over that state and produce a triage verdict.
+`pr-triage check <owner/repo> <pr_number>` fetches a PR from GitHub, retrieves relevant guideline context from a per-repo ChromaDB index, classifies the PR size, and runs a guidelines-compliance critic (Claude Sonnet) that returns a structured score, findings, and citations. The result prints as human-readable output or as full `TriageState` JSON for downstream consumers (e.g. a GitHub Action comment).
 
-## MVP scope (Phase 1)
+## Phase 2 deliverables
+
+- `ClaudeClient` — real Anthropic SDK calls, model routing (Sonnet for critics, Haiku for classification), tenacity retry on 429 / 5xx / connection errors, per-run token budget cap
+- `RAGIndex` — ChromaDB persistent store at `data/chroma/`, sentence-transformers `all-MiniLM-L6-v2` embeddings, 800-1000 char paragraph chunks with heading prefix, per-repo indexing
+- LangGraph pipeline — `ingest_pr → classify_size → retrieve_context → guidelines_critic → emit_verdict`; trivial changesets skip the critic
+- CLI — `pr-triage check`, `pr-triage index`, global `--fake` flag for offline replay from `tests/fixtures/llm/`
+- `--json` flag on `check` emits the full `TriageState` (consumed by Phase 4 GitHub Action)
+- 91 tests (87% coverage; remaining gaps are live-API paths — GitHub, Anthropic, ChromaDB)
+
+## Phase 1 deliverables
 
 - GitHub PR ingestion via PyGithub
-- `TriageState` Pydantic model capturing all data needed by later agent phases
-- `ClaudeClient` gateway stub (no LLM calls yet)
+- `TriageState` Pydantic model
+- `ClaudeClient` gateway (stub in Phase 1, real in Phase 2)
 - Per-run token budget cap via `ContextVar`
-- CLI: `pr-triage fetch <owner/repo> <pr_number>` prints JSON to stdout
-- Pytest suite with `--fake` mode using recorded fixture data
+- CLI: `pr-triage fetch <owner/repo> <pr_number>` prints full JSON
+- Pytest suite with `--fake` mode
 
 ## Non-goals
 
-- No LLM calls in Phase 1
-- No GitHub Action packaging yet
 - Not a general-purpose code review tool
-- Not optimized for throughput or latency
+- No GitHub Action packaging yet (Phase 4)
 
 ## Current phase status
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| 1 | In progress | Repo skeleton, GitHub ingestion, CLI |
-| 2 | Planned | Multi-agent LangGraph critic pipeline |
-| 3 | Planned | RAG context retrieval |
+| 1 | Done | Repo skeleton, GitHub ingestion, CLI |
+| 2 | Done | LangGraph critic pipeline, RAG, guidelines critic |
+| 3 | Planned | Additional critics, eval harness |
 | 4 | Planned | GitHub Action packaging |
 
 ## Usage
@@ -39,11 +46,27 @@ This is portfolio project #2, built in public.
 # Install
 pip install -e ".[dev]"
 
-# Set credentials
-export GITHUB_TOKEN=ghp_...
-export ANTHROPIC_API_KEY=sk-ant-...  # not used until Phase 2
+# Credentials — shell environment variables take priority.
+# .env (if present) provides fallback values for variables not set in the shell.
+cp .env.example .env   # fill in your tokens, never commit .env
 
-# Fetch a PR
+# Index a repo's guidelines and recent PR history into ChromaDB
+# (downloads all-MiniLM-L6-v2 on first run, ~90 MB)
+pr-triage index owner/repo
+
+# Run the triage critic on a PR
+pr-triage check owner/repo 42
+
+# JSON output — full TriageState, useful for scripting or Phase 4
+pr-triage check owner/repo 42 --json
+
+# Dry-run without API calls — replays cached LLM responses
+pr-triage --fake check owner/repo 42
+
+# Raise the token budget cap (default 50 000)
+pr-triage check owner/repo 42 --max-tokens 100000
+
+# Phase 1: just fetch and inspect the raw state
 pr-triage fetch owner/repo 42
 ```
 
@@ -51,19 +74,29 @@ pr-triage fetch owner/repo 42
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # live mode (needs GITHUB_TOKEN)
-pytest --fake             # use recorded fixture data, no credentials needed
+pytest                    # unit + fake-mode tests, no live credentials needed
+pytest --fake             # same, explicit flag
+pytest --cov=src/pr_triage --cov-report=term-missing
 ```
+
+`pytest-cov` is included in the `dev` extra.
 
 ## Project structure
 
 ```
 src/pr_triage/
-├── cli.py           # Typer entry point
-├── github_client.py # PyGithub wrapper
-├── claude_client.py # Claude API gateway (stub in Phase 1)
-├── state.py         # TriageState Pydantic model
-└── budget.py        # Token budget ContextVar
+├── cli.py              # Typer entry point: fetch, check, index; global --fake flag
+├── github_client.py    # PyGithub wrapper; fetch_pr, fetch_repo_context
+├── claude_client.py    # Claude API gateway — real SDK + fake replay mode
+├── state.py            # TriageState and Pydantic models
+├── budget.py           # Token budget ContextVar
+├── rag.py              # ChromaDB index + sentence-transformers retrieval
+└── graph/
+    ├── nodes.py        # LangGraph node functions
+    └── pipeline.py     # StateGraph assembly, run_pipeline(), budget pre-check
 tests/
-└── fixtures/        # Recorded GitHub API responses for --fake mode
+└── fixtures/
+    ├── papertriage_pr9.json            # Recorded GitHub PR #9
+    └── llm/
+        └── check_<owner>__<repo>_pr<N>.json  # Recorded LLM response sequences
 ```
