@@ -307,3 +307,88 @@ def test_fixture_path_replaces_slash_with_double_underscore():
 def test_fixture_path_includes_pr_number():
     p = _fixture_path("owner/repo", 42)
     assert "pr42" in p.name
+
+
+# ------------------------------------------------------------------
+# harvest command
+# ------------------------------------------------------------------
+
+def test_harvest_requires_github_token():
+    with patch.dict(os.environ, {}, clear=True):
+        result = runner.invoke(app, ["harvest", "owner/repo"])
+    assert result.exit_code == 1
+    assert "GITHUB_TOKEN" in result.output
+
+
+def test_harvest_rejects_invalid_repo_format():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.harvest.estimate_harvest_calls", return_value={"estimated_new": 0, "already_cached": 0}):
+        result = runner.invoke(app, ["harvest", "notarepo"])
+    assert result.exit_code == 1
+    assert "owner/repo" in result.output
+
+
+def test_harvest_yes_flag_skips_confirmation(tmp_path):
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.harvest.harvest_repo", return_value=(5, 0)) as mock_harvest:
+        result = runner.invoke(
+            app,
+            ["harvest", "owner/repo", "--yes", "--out-dir", str(tmp_path)],
+        )
+    assert result.exit_code == 0
+    assert "5" in result.output
+    mock_harvest.assert_called_once()
+
+
+# ------------------------------------------------------------------
+# prelabel command
+# ------------------------------------------------------------------
+
+def test_prelabel_requires_existing_candidates_dir():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}):
+        result = runner.invoke(app, ["prelabel", "--candidates-dir", "/nonexistent/path"])
+    assert result.exit_code == 1
+    assert "not found" in result.output
+
+
+def test_prelabel_happy_path(tmp_path):
+    cand_dir = tmp_path / "candidates"
+    cand_dir.mkdir()
+    out_path = tmp_path / "pre_labels.jsonl"
+
+    with patch("pr_triage.prelabel.prelabel_dir", return_value=7) as mock_pl:
+        result = runner.invoke(
+            app,
+            ["prelabel", "--candidates-dir", str(cand_dir), "--out", str(out_path)],
+        )
+    assert result.exit_code == 0
+    assert "7" in result.output
+    mock_pl.assert_called_once()
+
+
+# ------------------------------------------------------------------
+# golden-build command
+# ------------------------------------------------------------------
+
+def test_golden_build_exits_on_error(tmp_path):
+    with patch("pr_triage.golden.build_golden_set") as mock_build:
+        from pr_triage.golden import GoldenBuildError
+        mock_build.side_effect = GoldenBuildError("missing labels file")
+        result = runner.invoke(
+            app,
+            ["golden-build", "--labels", str(tmp_path / "missing.jsonl")],
+        )
+    assert result.exit_code == 1
+    assert "missing labels file" in result.output
+
+
+def test_golden_build_happy_path(tmp_path):
+    with patch("pr_triage.golden.build_golden_set", return_value={
+        "total": 30, "approve": 10, "request_changes": 15, "reject": 5,
+    }):
+        result = runner.invoke(
+            app,
+            ["golden-build", "--labels", str(tmp_path / "labels.jsonl")],
+        )
+    assert result.exit_code == 0
+    assert "30" in result.output

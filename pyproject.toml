@@ -25,6 +25,9 @@ dev = [
     "pytest-mock>=3.14",
     "pytest-cov>=5.0",
 ]
+eval = [
+    "streamlit>=1.35",
+]
 
 [project.scripts]
 pr-triage = "pr_triage.cli:app"
