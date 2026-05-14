@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import operator
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, Field
 
@@ -44,10 +45,30 @@ class CriticOutput(BaseModel):
     details: Optional[GuidelinesCriticOutput] = None
 
 
+class SloppinessFeatures(BaseModel):
+    """Heuristic features extracted from the diff for the slop-signals critic."""
+    duplicate_line_ratio: float = 0.0
+    long_function_count: int = 0     # functions/methods > 50 lines added
+    todo_fixme_count: int = 0        # TODO/FIXME/HACK lines added
+    debug_print_count: int = 0       # debug print/console.log lines added
+    magic_number_count: int = 0      # raw numeric literals added
+    missing_docstring_count: int = 0  # public functions/classes added without docstrings
+
+
 class Verdict(BaseModel):
     decision: str  # "approve" | "request_changes" | "reject"
     summary: str
     confidence: float = 0.0
+
+
+class AggregateResult(BaseModel):
+    """Richer aggregate output produced by the Phase 3 deterministic aggregator."""
+    decision: str  # "approve" | "request_changes" | "reject"
+    summary: str
+    confidence: float = 0.0
+    per_critic_scores: dict[str, int] = Field(default_factory=dict)
+    deciding_factors: list[str] = Field(default_factory=list)
+    missing_critics: list[str] = Field(default_factory=list)
 
 
 class TriageState(BaseModel):
@@ -68,8 +89,11 @@ class TriageState(BaseModel):
     # Phase 2: pipeline outputs
     size_classification: Optional[str] = None  # "trivial"|"small"|"medium"|"large"
     rag_chunks: list[str] = Field(default_factory=list)
-    critic_outputs: list[CriticOutput] = Field(default_factory=list)
+    # operator.add reducer enables parallel fan-in from multiple critic nodes
+    critic_outputs: Annotated[list[CriticOutput], operator.add] = Field(default_factory=list)
     aggregate_verdict: Optional[Verdict] = None
 
     # Phase 3+
+    sloppiness_features: Optional[SloppinessFeatures] = None
+    aggregate_result: Optional[AggregateResult] = None
     confidence_score: Optional[float] = None
