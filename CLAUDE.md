@@ -21,12 +21,16 @@ src/pr_triage/
 ├── github_client.py # PyGithub wrapper — all GitHub I/O
 ├── claude_client.py # Single gateway for all Claude API calls
 ├── state.py         # TriageState Pydantic model
-└── budget.py        # BudgetContext ContextVar + BudgetExceeded
+├── budget.py        # BudgetContext ContextVar + BudgetExceeded
+├── rag.py           # ChromaDB RAG index + sentence-transformers retrieval
+└── graph/
+    ├── nodes.py     # LangGraph node functions
+    └── pipeline.py  # StateGraph assembly, run_pipeline(), budget pre-check
 ```
 
 ## Phase status
 
-- **Phase 1 (current):** repo skeleton, ClaudeClient stub, GitHub PR ingestion, CLI `fetch` command.
-- Phase 2: multi-agent LangGraph critic pipeline.
-- Phase 3: RAG context retrieval.
+- **Phase 1 (done):** repo skeleton, ClaudeClient stub, GitHub PR ingestion, CLI `fetch` command.
+- **Phase 2 (done):** real ClaudeClient, ChromaDB RAG, LangGraph single-critic pipeline, CLI `check` + `index`.
+- **Phase 3 (current):** golden-set construction, multi-critic pipeline (guidelines + architecture + slop_signals), aggregator, eval harness, Streamlit eval viewer.
 - Phase 4: GitHub Action packaging.
