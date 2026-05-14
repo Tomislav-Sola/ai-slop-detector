@@ -117,6 +117,99 @@ def check(
 
 
 @app.command()
+def harvest(
+    ctx: typer.Context,
+    repos: list[str] = typer.Argument(..., help="GitHub repo(s) in owner/repo format."),
+    out_dir: Path = typer.Option(Path("data/candidates"), "--out-dir", help="Output directory for candidate JSON files."),
+    max_prs: int = typer.Option(200, "--max-prs", help="Max PRs to fetch per repo."),
+    states: str = typer.Option("open,closed", "--states", help="Comma-separated PR states: open, closed."),
+    re_record: bool = typer.Option(False, "--re-record", help="Re-fetch even if a candidate file already exists."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip cost-preflight confirmation."),
+) -> None:
+    """Harvest PR candidates from GitHub repos into data/candidates/ for golden-set construction."""
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        typer.echo("Error: GITHUB_TOKEN is not set.", err=True)
+        raise typer.Exit(1)
+
+    state_list = [s.strip() for s in states.split(",") if s.strip()]
+
+    from pr_triage.harvest import estimate_harvest_calls, harvest_repo
+
+    for repo in repos:
+        if "/" not in repo:
+            typer.echo(f"Error: '{repo}' must be in owner/repo format.", err=True)
+            raise typer.Exit(1)
+
+        if not yes:
+            typer.echo(f"Estimating harvest scope for {repo}…", err=True)
+            try:
+                est = estimate_harvest_calls(
+                    repo, token, out_dir, states=state_list, max_prs=max_prs, re_record=re_record
+                )
+                typer.echo(
+                    f"  {est['estimated_new']} new PRs to fetch, "
+                    f"{est['already_cached']} already cached.",
+                    err=True,
+                )
+            except Exception as exc:
+                typer.echo(f"  (estimate failed: {exc})", err=True)
+
+            if not typer.confirm(f"Proceed with harvesting {repo}?"):
+                typer.echo("Aborted.", err=True)
+                raise typer.Exit(0)
+
+        typer.echo(f"Harvesting {repo}…", err=True)
+        new_count, skipped = harvest_repo(
+            repo, token, out_dir, states=state_list, max_prs=max_prs,
+            re_record=re_record, verbose=True,
+        )
+        typer.echo(f"  Done: {new_count} new, {skipped} skipped.")
+
+
+@app.command()
+def prelabel(
+    candidates_dir: Path = typer.Option(Path("data/candidates"), "--candidates-dir", help="Directory of harvested candidate JSON files."),
+    out_path: Path = typer.Option(Path("data/pre_labels.jsonl"), "--out", help="Output JSONL path for pre-labels."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Heuristically pre-label all harvested PR candidates."""
+    if not candidates_dir.exists():
+        typer.echo(f"Error: candidates directory not found: {candidates_dir}", err=True)
+        raise typer.Exit(1)
+
+    from pr_triage.prelabel import prelabel_dir
+
+    count = prelabel_dir(candidates_dir, out_path, verbose=verbose)
+    typer.echo(f"Pre-labeled {count} candidates → {out_path}")
+
+
+@app.command(name="golden-build")
+def golden_build(
+    labels_path: Path = typer.Option(Path("data/golden_labels.jsonl"), "--labels", help="Manual labels JSONL (repo, pr_number, label, notes?)."),
+    candidates_dir: Path = typer.Option(Path("data/candidates"), "--candidates-dir"),
+    out_dir: Path = typer.Option(Path("tests/fixtures/golden"), "--out-dir"),
+    force: bool = typer.Option(False, "--force", help="Write even if class-balance requirements aren't met."),
+) -> None:
+    """Build the golden test fixture set from manual labels + harvested candidates."""
+    from pr_triage.golden import GoldenBuildError, build_golden_set
+
+    try:
+        summary = build_golden_set(labels_path, candidates_dir, out_dir, force=force)
+    except GoldenBuildError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(
+        f"Golden set written to {out_dir}: "
+        f"{summary['total']} total "
+        f"({summary['approve']} approve, "
+        f"{summary['request_changes']} request_changes, "
+        f"{summary['reject']} reject)"
+    )
+
+
+@app.command()
 def index(
     ctx: typer.Context,
     repo: str = typer.Argument(..., help="GitHub repo in owner/repo format"),
