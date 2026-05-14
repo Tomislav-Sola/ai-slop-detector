@@ -24,13 +24,24 @@ class PRMetadata(BaseModel):
     mergeable: Optional[bool] = None
 
 
-# Phase 2+ stubs — populated by critic agents
+class GuidelinesFinding(BaseModel):
+    severity: str  # "critical" | "major" | "minor" | "info"
+    category: str
+    evidence: str  # exact quote from the PR diff or repo context
+
+
+class GuidelinesCriticOutput(BaseModel):
+    score: int  # 0-10
+    findings: list[GuidelinesFinding]
+    citations: list[str]  # chunk IDs actually used by the critic
+
 
 class CriticOutput(BaseModel):
     critic_name: str
     verdict: str  # "pass" | "fail" | "needs_review"
     reasoning: str
     confidence: float = 0.0
+    details: Optional[GuidelinesCriticOutput] = None
 
 
 class Verdict(BaseModel):
@@ -54,10 +65,11 @@ class TriageState(BaseModel):
     agents_md: Optional[str] = None
     recent_merged_titles: list[str] = Field(default_factory=list)
 
-    # Phase 2+: critic pipeline outputs
+    # Phase 2: pipeline outputs
+    size_classification: Optional[str] = None  # "trivial"|"small"|"medium"|"large"
+    rag_chunks: list[str] = Field(default_factory=list)
     critic_outputs: list[CriticOutput] = Field(default_factory=list)
     aggregate_verdict: Optional[Verdict] = None
 
-    # Phase 3+: RAG
-    rag_chunks: list[str] = Field(default_factory=list)
+    # Phase 3+
     confidence_score: Optional[float] = None

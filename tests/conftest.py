@@ -24,3 +24,12 @@ def use_fake(request: pytest.FixtureRequest) -> bool:
 def papertriage_pr9() -> dict:
     with open(FIXTURES_DIR / "papertriage_pr9.json") as f:
         return json.load(f)
+
+
+@pytest.fixture(autouse=True)
+def reset_budget():
+    """Reset the budget ContextVar before each test to prevent cross-test leakage."""
+    from pr_triage.budget import _budget_var
+    _budget_var.set(None)
+    yield
+    _budget_var.set(None)
