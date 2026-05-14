@@ -122,8 +122,9 @@ def harvest(
     repos: list[str] = typer.Argument(..., help="GitHub repo(s) in owner/repo format."),
     out_dir: Path = typer.Option(Path("data/candidates"), "--out-dir", help="Output directory for candidate JSON files."),
     max_prs: int = typer.Option(200, "--max-prs", help="Max PRs to fetch per repo."),
-    states: str = typer.Option("open,closed", "--states", help="Comma-separated PR states: open, closed."),
+    states: str = typer.Option("closed", "--states", help="Comma-separated PR states to harvest (closed, open). Defaults to closed-only since open PRs have no decided outcome."),
     re_record: bool = typer.Option(False, "--re-record", help="Re-fetch even if a candidate file already exists."),
+    min_age_days: int = typer.Option(14, "--min-age-days", help="Skip PRs closed fewer than this many days ago (settle-time buffer). Set to 0 to disable."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip cost-preflight confirmation."),
 ) -> None:
     """Harvest PR candidates from GitHub repos into data/candidates/ for golden-set construction."""
@@ -162,7 +163,7 @@ def harvest(
         typer.echo(f"Harvesting {repo}…", err=True)
         new_count, skipped = harvest_repo(
             repo, token, out_dir, states=state_list, max_prs=max_prs,
-            re_record=re_record, verbose=True,
+            min_age_days=min_age_days, re_record=re_record, verbose=True,
         )
         typer.echo(f"  Done: {new_count} new, {skipped} skipped.")
 
