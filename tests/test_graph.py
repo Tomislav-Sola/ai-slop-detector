@@ -89,6 +89,21 @@ def test_trivial_by_docs_only_files():
     assert _is_trivial(s) is True
 
 
+def test_trivial_by_mixed_non_code_files():
+    # Regression: .png, .json, .toml and LICENSE were not in the original suffix set
+    s = _make_state(
+        files_changed=["docs/screenshot.png", "examples/run.json", "pyproject.toml", "LICENSE", "README.md"],
+        metadata=PRMetadata(
+            number=1, title="t", author="a",
+            created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            base_branch="main", head_branch="fix",
+            additions=80, deletions=10, changed_files=5,
+        ),
+    )
+    assert _is_trivial(s) is True
+
+
 def test_not_trivial_with_code_files():
     s = _make_state()
     assert _is_trivial(s) is False

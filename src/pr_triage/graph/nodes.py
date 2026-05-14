@@ -14,7 +14,21 @@ if TYPE_CHECKING:
 
 # File extensions that indicate a documentation-only or config-only changeset.
 # A PR touching only these is classified as trivial without calling Haiku.
-_DOC_AND_CONFIG_SUFFIXES = {".md", ".rst", ".txt", ".gitignore", ".editorconfig", ""}
+# Covers: prose docs, images, common config formats, lock files, and files
+# with no extension (LICENSE, NOTICE, AUTHORS, etc.).
+_DOC_AND_CONFIG_SUFFIXES = {
+    # Prose / documentation
+    ".md", ".rst", ".txt", ".adoc",
+    # Config / manifest (no executable logic)
+    ".toml", ".yaml", ".yml", ".json", ".ini", ".cfg", ".conf",
+    ".gitignore", ".gitattributes", ".editorconfig", ".prettierrc", ".eslintrc",
+    # Assets
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+    # Lock files
+    ".lock",
+    # No extension — LICENSE, NOTICE, AUTHORS, Makefile variants, etc.
+    "",
+}
 
 _CLASSIFY_SYSTEM = (
     "You are a PR size classifier. "
