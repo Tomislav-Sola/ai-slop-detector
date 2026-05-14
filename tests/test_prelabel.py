@@ -111,16 +111,29 @@ def test_rejected_quality_owner_comment():
     assert r["label"] == "rejected_quality"
 
 
-def test_rejected_quality_contributor_comment_not_maintainer():
+def test_rejected_quality_contributor_comment_fires():
+    # CONTRIBUTOR is in the maintainer set (covers mitchellh, dimbleby, etc.)
+    comment = {
+        "user": "core-dev",
+        "author_association": "CONTRIBUTOR",
+        "body": "Scope issue, closing.",
+        "created_at": _OLD,
+    }
+    c = _cand(issue_comments=[comment])
+    r = prelabel_candidate(c)
+    assert r["label"] == "rejected_quality"
+
+
+def test_rejected_quality_none_association_not_maintainer():
     comment = {
         "user": "rando",
-        "author_association": "CONTRIBUTOR",
+        "author_association": "NONE",
         "body": "I like this idea!",
         "created_at": _OLD,
     }
     c = _cand(issue_comments=[comment])
     r = prelabel_candidate(c)
-    assert r["label"] == "unclear"  # CONTRIBUTOR is not in maintainer set
+    assert r["label"] == "unclear"  # NONE is not in maintainer set
 
 
 # ------------------------------------------------------------------
@@ -256,6 +269,8 @@ def test_silent_slop_boundary_max_lines():
     "AI policy",
     "violating our policies",
     "violating our policy",
+    "AI-generated",            # hyphen variant
+    "AI generated",            # space variant (pydantic: "most likely fully AI generated")
     "drive-by",
     "did you write this yourself",
     "please read CONTRIBUTING",
@@ -265,6 +280,8 @@ def test_silent_slop_boundary_max_lines():
     "did you actually test",
     "out of scope",
     "not accepted",
+    "procedures not followed",  # ghostty#10614
+    "bot spam",                 # poetry#10833
 ])
 def test_maintainer_explicit_phrase(phrase):
     c = _cand(issue_comments=[_maintainer_comment(f"Closing because {phrase}.")])
@@ -272,21 +289,22 @@ def test_maintainer_explicit_phrase(phrase):
     assert "maintainer_explicit_rejection" in r["signals"]
 
 
-def test_maintainer_explicit_outside_window_no_trigger():
-    # Comment posted 48h before close — outside the 24h window
-    c = _cand(issue_comments=[_maintainer_comment("out of scope", hours_before_close=48)])
-    r = prelabel_candidate(c)
-    assert "maintainer_explicit_rejection" not in r["signals"]
-
-
-def test_maintainer_explicit_contributor_no_trigger():
+def test_maintainer_explicit_contributor_fires():
+    # CONTRIBUTOR fires — mitchellh (ghostty), dimbleby (poetry) are CONTRIBUTOR
     comment = {
-        "user": "user",
+        "user": "founder",
         "author_association": "CONTRIBUTOR",
-        "body": "out of scope please read CONTRIBUTING",
+        "body": "Closing this due to violating our policies.",
         "created_at": (_NOW - timedelta(days=30) - timedelta(minutes=30)).isoformat(),
     }
     c = _cand(issue_comments=[comment])
+    r = prelabel_candidate(c)
+    assert "maintainer_explicit_rejection" in r["signals"]
+
+
+def test_maintainer_explicit_outside_window_no_trigger():
+    # Comment posted 48h before close — outside the 24h window
+    c = _cand(issue_comments=[_maintainer_comment("out of scope", hours_before_close=48)])
     r = prelabel_candidate(c)
     assert "maintainer_explicit_rejection" not in r["signals"]
 

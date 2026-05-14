@@ -19,14 +19,17 @@ _AI_KEYWORD_RE = re.compile(
 
 # Maintainer phrases that explicitly reject a PR
 _REJECTION_PHRASE_RE = re.compile(
-    r"AI policy|violating our (?:policy|policies)|AI-generated|drive-by|"
+    r"AI policy|violating our (?:policy|policies)|AI[- ]generated|drive-by|"
     r"did you write this yourself|please read CONTRIBUTING|"
     r"read the (?:instructions|guidelines|policy)|did you actually test|"
-    r"out of scope|not accepted",
+    r"out of scope|not accepted|procedures not followed|bot spam",
     re.IGNORECASE,
 )
 
-_MAINTAINER_ASSOCIATIONS = frozenset({"MEMBER", "OWNER", "COLLABORATOR"})
+# CONTRIBUTOR is included because many repo founders/core maintainers are
+# harvested with that association (e.g. mitchellh on ghostty-org/ghostty,
+# dimbleby on python-poetry/poetry) despite having maintainer authority.
+_MAINTAINER_ASSOCIATIONS = frozenset({"MEMBER", "OWNER", "COLLABORATOR", "CONTRIBUTOR"})
 
 
 def prelabel_candidate(candidate: dict) -> dict:
