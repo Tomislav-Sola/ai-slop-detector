@@ -89,6 +89,33 @@ class GitHubClient:
         )
 
 
+    def fetch_repo_context(
+        self,
+        repo_name: str,
+        *,
+        recent_n: int = 50,
+    ) -> dict:
+        """Fetch repo-level context for RAG indexing.
+
+        Returns contributing_md, agents_md, and the last recent_n merged PR
+        titles + bodies.
+        """
+        repo = self._gh.get_repo(repo_name)
+        contributing_md = _fetch_file(repo, _CONTRIBUTING_CANDIDATES)
+        agents_md = _fetch_file(repo, _AGENTS_CANDIDATES)
+        merged_prs: list[dict] = []
+        for pr in repo.get_pulls(state="closed", sort="updated", direction="desc"):
+            if pr.merged:
+                merged_prs.append({"title": pr.title, "body": pr.body or ""})
+            if len(merged_prs) >= recent_n:
+                break
+        return {
+            "contributing_md": contributing_md,
+            "agents_md": agents_md,
+            "merged_prs": merged_prs,
+        }
+
+
 def _fetch_diff(pr: PullRequest, token: str | None = None) -> str | None:
     try:
         import urllib.request
