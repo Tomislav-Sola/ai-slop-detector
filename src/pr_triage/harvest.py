@@ -136,6 +136,10 @@ def harvest_repo(
 ) -> tuple[int, int]:
     """Harvest closed PR candidates from a GitHub repo into per-entry JSON files.
 
+    max_prs is the target number of NEW candidates to save — settle-filtered and
+    already-cached PRs do not count toward it. The harvester keeps scanning until
+    max_prs new files are written or the PR list is exhausted.
+
     Idempotent: existing files are skipped unless re_record=True.
     PRs closed within min_age_days of now are skipped (settle-time buffer).
     Returns (new_count, skipped_count).
@@ -149,7 +153,6 @@ def harvest_repo(
 
     new_count = 0
     skipped_count = 0
-    total_seen = 0
     author_cache: dict[str, Optional[int]] = {}
 
     cutoff = (
@@ -159,19 +162,18 @@ def harvest_repo(
     )
 
     for state in states:
-        if total_seen >= max_prs:
+        if new_count >= max_prs:
             break
         for pr in repo.get_pulls(state=state, sort="updated", direction="desc"):
-            if total_seen >= max_prs:
+            if new_count >= max_prs:
                 break
 
             dest = candidate_path(out_dir, repo_name, pr.number)
             if dest.exists() and not re_record:
                 skipped_count += 1
-                total_seen += 1
                 continue
 
-            # Settle-time filter: skip PRs closed too recently
+            # Settle-time filter: skip PRs closed too recently (doesn't count toward cap)
             if cutoff is not None:
                 raw_closed = pr.raw_data.get("closed_at")
                 if raw_closed:
@@ -184,7 +186,6 @@ def harvest_repo(
                                 f"closed {age_days}d ago (< {min_age_days}d settle-time)"
                             )
                         skipped_count += 1
-                        total_seen += 1
                         continue
 
             try:
@@ -255,8 +256,6 @@ def harvest_repo(
                     print(f"  skipped PR #{pr.number}: {exc}")
                 skipped_count += 1
 
-            total_seen += 1
-
     return new_count, skipped_count
 
 
@@ -289,28 +288,26 @@ def estimate_harvest_calls(
     totals: dict[str, int] = {}
     already_cached = 0
     estimated_new = 0
-    total_seen = 0
 
     for state in states:
+        if estimated_new >= max_prs:
+            break
         count = 0
         for pr in repo.get_pulls(state=state, sort="updated", direction="desc"):
-            if total_seen >= max_prs:
+            if estimated_new >= max_prs:
                 break
+            count += 1
             if cutoff is not None:
                 raw_closed = pr.raw_data.get("closed_at")
                 if raw_closed:
                     closed_dt = datetime.fromisoformat(raw_closed.replace("Z", "+00:00"))
                     if closed_dt > cutoff:
-                        count += 1
-                        total_seen += 1
-                        continue  # would be skipped
+                        continue  # would be settle-filtered; doesn't count
             dest = candidate_path(out_dir, repo_name, pr.number)
             if dest.exists() and not re_record:
                 already_cached += 1
             else:
                 estimated_new += 1
-            count += 1
-            total_seen += 1
         totals[f"total_{state}"] = count
 
     return {"estimated_new": estimated_new, "already_cached": already_cached, **totals}
