@@ -1,16 +1,28 @@
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
-from pr_triage.cli import app
-from pr_triage.state import PRMetadata, TriageState
+from pr_triage.cli import app, _fixture_path
+from pr_triage.state import (
+    CriticOutput,
+    GuidelinesCriticOutput,
+    GuidelinesFinding,
+    PRMetadata,
+    TriageState,
+    Verdict,
+)
 
 runner = CliRunner()
 
+
+# ------------------------------------------------------------------
+# Shared helpers
+# ------------------------------------------------------------------
 
 def _make_state() -> TriageState:
     return TriageState(
@@ -34,9 +46,44 @@ def _make_state() -> TriageState:
     )
 
 
-# Single-command Typer apps are invoked without the command name:
-# fetch is a proper subcommand: runner.invoke(app, ["fetch", "owner/repo", "7"])
+def _make_result_state() -> TriageState:
+    findings = [GuidelinesFinding(severity="minor", category="docs", evidence="README not updated")]
+    details = GuidelinesCriticOutput(score=7, findings=findings, citations=["chunk-0"])
+    output = CriticOutput(
+        critic_name="guidelines_critic",
+        verdict="needs_review",
+        reasoning="Score 7/10",
+        confidence=0.7,
+        details=details,
+    )
+    state = _make_state()
+    return state.model_copy(update={
+        "size_classification": "medium",
+        "rag_chunks": ["[chunk-0] Use conventional commits"],
+        "critic_outputs": [output],
+        "aggregate_verdict": Verdict(
+            decision="request_changes",
+            summary="Guidelines critic: 7/10 (needs_review). 1 finding(s), 1 citation(s).",
+            confidence=0.7,
+        ),
+    })
 
+
+@pytest.fixture
+def llm_fixture(tmp_path) -> Path:
+    """Minimal LLM fixture file for --fake CLI tests."""
+    responses = [
+        "medium",
+        json.dumps({"score": 7, "findings": [{"severity": "minor", "category": "docs", "evidence": "test"}], "citations": ["chunk-0"]}),
+    ]
+    p = tmp_path / "fixture.json"
+    p.write_text(json.dumps(responses))
+    return p
+
+
+# ------------------------------------------------------------------
+# fetch command (Phase 1 — keep existing tests)
+# ------------------------------------------------------------------
 
 def test_fetch_missing_token_exits_nonzero():
     with patch.dict(os.environ, {"GITHUB_TOKEN": ""}):
@@ -99,3 +146,164 @@ def test_fetch_happy_path_passes_pr_number_to_client():
             mock_cls.return_value.fetch_pr.return_value = state
             runner.invoke(app, ["fetch", "owner/repo", "7"])
     mock_cls.return_value.fetch_pr.assert_called_once_with("owner/repo", 7)
+
+
+# ------------------------------------------------------------------
+# check command
+# ------------------------------------------------------------------
+
+def test_check_missing_token_exits_nonzero():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": ""}):
+        result = runner.invoke(app, ["check", "owner/repo", "1"])
+    assert result.exit_code == 1
+
+
+def test_check_missing_token_error_message():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": ""}):
+        result = runner.invoke(app, ["check", "owner/repo", "1"])
+    assert "GITHUB_TOKEN" in result.output
+
+
+def test_check_bad_repo_format_exits_nonzero():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}):
+        result = runner.invoke(app, ["check", "noslash", "1"])
+    assert result.exit_code == 1
+
+
+def test_check_missing_api_key_exits_nonzero():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake", "ANTHROPIC_API_KEY": ""}):
+        result = runner.invoke(app, ["check", "owner/repo", "1"])
+    assert result.exit_code == 1
+
+
+def test_check_missing_api_key_error_message():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake", "ANTHROPIC_API_KEY": ""}):
+        result = runner.invoke(app, ["check", "owner/repo", "1"])
+    assert "ANTHROPIC_API_KEY" in result.output
+
+
+def test_check_fake_missing_fixture_exits_nonzero():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.cli.GitHubClient") as mock_gh, \
+         patch("pr_triage.cli._fixture_path", return_value=Path("/nonexistent/fixture.json")):
+        mock_gh.return_value.fetch_pr.return_value = _make_state()
+        result = runner.invoke(app, ["--fake", "check", "owner/repo", "7"])
+    assert result.exit_code == 1
+
+
+def test_check_fake_happy_path_exits_zero(llm_fixture):
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.cli.GitHubClient") as mock_gh, \
+         patch("pr_triage.rag.RAGIndex"), \
+         patch("pr_triage.cli._fixture_path", return_value=llm_fixture), \
+         patch("pr_triage.graph.pipeline.run_pipeline", return_value=_make_result_state()):
+        mock_gh.return_value.fetch_pr.return_value = _make_state()
+        result = runner.invoke(app, ["--fake", "check", "owner/repo", "7"])
+    assert result.exit_code == 0
+
+
+def test_check_fake_human_readable_shows_score(llm_fixture):
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.cli.GitHubClient") as mock_gh, \
+         patch("pr_triage.rag.RAGIndex"), \
+         patch("pr_triage.cli._fixture_path", return_value=llm_fixture), \
+         patch("pr_triage.graph.pipeline.run_pipeline", return_value=_make_result_state()):
+        mock_gh.return_value.fetch_pr.return_value = _make_state()
+        result = runner.invoke(app, ["--fake", "check", "owner/repo", "7"])
+    assert "7/10" in result.output
+    assert "needs_review" in result.output
+
+
+def test_check_fake_json_flag_outputs_valid_json(llm_fixture):
+    result_state = _make_result_state()
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.cli.GitHubClient") as mock_gh, \
+         patch("pr_triage.rag.RAGIndex"), \
+         patch("pr_triage.cli._fixture_path", return_value=llm_fixture), \
+         patch("pr_triage.graph.pipeline.run_pipeline", return_value=result_state):
+        mock_gh.return_value.fetch_pr.return_value = _make_state()
+        result = runner.invoke(app, ["--fake", "check", "owner/repo", "7", "--json"])
+    # CliRunner mixes stderr into output; skip the progress line before the JSON object.
+    json_text = result.output[result.output.index("{"):]
+    data = json.loads(json_text)
+    assert data["pr_number"] == 7
+    assert data["size_classification"] == "medium"
+    assert data["aggregate_verdict"]["decision"] == "request_changes"
+
+
+def test_check_trivial_state_shows_approve(llm_fixture):
+    trivial = _make_state().model_copy(update={
+        "size_classification": "trivial",
+        "aggregate_verdict": Verdict(
+            decision="approve",
+            summary="Trivial changeset (docs/config only or <10 lines). No critic run.",
+            confidence=1.0,
+        ),
+    })
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.cli.GitHubClient") as mock_gh, \
+         patch("pr_triage.rag.RAGIndex"), \
+         patch("pr_triage.cli._fixture_path", return_value=llm_fixture), \
+         patch("pr_triage.graph.pipeline.run_pipeline", return_value=trivial):
+        mock_gh.return_value.fetch_pr.return_value = _make_state()
+        result = runner.invoke(app, ["--fake", "check", "owner/repo", "7"])
+    assert "trivial" in result.output.lower()
+    assert "approve" in result.output.lower()
+
+
+# ------------------------------------------------------------------
+# index command
+# ------------------------------------------------------------------
+
+def test_index_missing_token_exits_nonzero():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": ""}):
+        result = runner.invoke(app, ["index", "owner/repo"])
+    assert result.exit_code == 1
+
+
+def test_index_bad_repo_format_exits_nonzero():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}):
+        result = runner.invoke(app, ["index", "noslash"])
+    assert result.exit_code == 1
+
+
+def test_index_happy_path_exits_zero():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.cli.GitHubClient") as mock_gh, \
+         patch("pr_triage.rag.RAGIndex") as mock_rag:
+        mock_gh.return_value.fetch_repo_context.return_value = {
+            "contributing_md": "Use conventional commits.",
+            "agents_md": None,
+            "merged_prs": [],
+        }
+        mock_rag.return_value.index_repo.return_value = 5
+        result = runner.invoke(app, ["index", "owner/repo"])
+    assert result.exit_code == 0
+
+
+def test_index_happy_path_reports_chunk_count():
+    with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
+         patch("pr_triage.cli.GitHubClient") as mock_gh, \
+         patch("pr_triage.rag.RAGIndex") as mock_rag:
+        mock_gh.return_value.fetch_repo_context.return_value = {
+            "contributing_md": None,
+            "agents_md": None,
+            "merged_prs": [],
+        }
+        mock_rag.return_value.index_repo.return_value = 12
+        result = runner.invoke(app, ["index", "owner/repo"])
+    assert "12" in result.output
+
+
+# ------------------------------------------------------------------
+# _fixture_path helper
+# ------------------------------------------------------------------
+
+def test_fixture_path_replaces_slash_with_double_underscore():
+    p = _fixture_path("owner/repo", 42)
+    assert "owner__repo" in p.name
+
+
+def test_fixture_path_includes_pr_number():
+    p = _fixture_path("owner/repo", 42)
+    assert "pr42" in p.name
