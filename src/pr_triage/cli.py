@@ -120,22 +120,76 @@ def check(
 def harvest(
     ctx: typer.Context,
     repos: list[str] = typer.Argument(..., help="GitHub repo(s) in owner/repo format."),
-    out_dir: Path = typer.Option(Path("data/candidates"), "--out-dir", help="Output directory for candidate JSON files."),
+    out_dir: Path = typer.Option(
+        Path("data/candidates_v2"), "--out-dir",
+        help="Output directory for candidate JSON files. Default: data/candidates_v2/ (diversity-balanced).",
+    ),
     max_prs: int = typer.Option(200, "--max-prs", help="Max PRs to fetch per repo."),
-    states: str = typer.Option("closed", "--states", help="Comma-separated PR states to harvest (closed, open). Defaults to closed-only since open PRs have no decided outcome."),
+    states: str = typer.Option(
+        "closed", "--states",
+        help="Comma-separated PR states to harvest (closed, open). Defaults to closed-only.",
+    ),
     re_record: bool = typer.Option(False, "--re-record", help="Re-fetch even if a candidate file already exists."),
-    min_age_days: int = typer.Option(14, "--min-age-days", help="Skip PRs closed fewer than this many days ago (settle-time buffer). Set to 0 to disable."),
+    min_age_days: int = typer.Option(14, "--min-age-days", help="Skip PRs closed fewer than this many days ago. Set to 0 to disable."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip cost-preflight confirmation."),
+    # Diversity options
+    max_prs_per_author: int = typer.Option(2, "--max-prs-per-author", help="Max PRs saved per author across all repos."),
+    max_prs_per_author_repo_pair: int = typer.Option(2, "--max-prs-per-author-repo-pair", help="Max PRs saved per (author, repo) pair."),
+    max_prs_per_repo: int = typer.Option(30, "--max-prs-per-repo", help="Max PRs saved per repo."),
+    min_distinct_authors: int = typer.Option(15, "--min-distinct-authors", help="Warn if fewer distinct authors are saved."),
+    min_distinct_repos: int = typer.Option(6, "--min-distinct-repos", help="Warn if fewer distinct repos are saved."),
+    exclude_authors_csv: str = typer.Option("", "--exclude-authors", help="Comma-separated author logins to exclude entirely."),
+    no_exclude_bots: bool = typer.Option(False, "--no-exclude-bots", help="Include bot authors (excluded by default)."),
+    seed_from_dir: Path = typer.Option(
+        None, "--seed-from-dir",
+        help=(
+            "Pre-seed diversity counters from an existing candidates dir "
+            "(e.g. data/candidates) so no duplicate authors/repos are over-represented."
+        ),
+    ),
 ) -> None:
-    """Harvest PR candidates from GitHub repos into data/candidates/ for golden-set construction."""
+    """Harvest PR candidates from GitHub repos with diversity constraints.
+
+    Results go to data/candidates_v2/ by default (clean separation from the
+    unbalanced data/candidates/ set). Diversity limits are applied per-author,
+    per-repo, and per (author, repo) pair across all repos in one invocation.
+    """
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         typer.echo("Error: GITHUB_TOKEN is not set.", err=True)
         raise typer.Exit(1)
 
     state_list = [s.strip() for s in states.split(",") if s.strip()]
+    exclude_authors = [a.strip() for a in exclude_authors_csv.split(",") if a.strip()]
 
-    from pr_triage.harvest import estimate_harvest_calls, harvest_repo
+    from pr_triage.harvest import (
+        DiversityConfig,
+        DiversityTracker,
+        estimate_harvest_calls,
+        harvest_repo,
+    )
+
+    diversity = DiversityConfig(
+        max_prs_per_author=max_prs_per_author,
+        max_prs_per_author_repo_pair=max_prs_per_author_repo_pair,
+        max_prs_per_repo=max_prs_per_repo,
+        min_distinct_authors=min_distinct_authors,
+        min_distinct_repos=min_distinct_repos,
+        exclude_authors=exclude_authors,
+        exclude_bot_authors=not no_exclude_bots,
+    )
+
+    # Seed tracker once; shared across all repos in this invocation.
+    seed_dir = seed_from_dir if seed_from_dir is not None else out_dir
+    tracker = DiversityTracker.from_dir(seed_dir)
+    if seed_from_dir is not None:
+        typer.echo(
+            f"Seeded diversity counters from {seed_from_dir}: "
+            f"{sum(tracker.author_counts.values())} existing PRs, "
+            f"{len(tracker.author_counts)} authors, "
+            f"{len(tracker.repo_counts)} repos.",
+            err=True,
+        )
 
     for repo in repos:
         if "/" not in repo:
@@ -164,14 +218,19 @@ def harvest(
         new_count, skipped = harvest_repo(
             repo, token, out_dir, states=state_list, max_prs=max_prs,
             min_age_days=min_age_days, re_record=re_record, verbose=True,
+            diversity=diversity, tracker=tracker,
         )
         typer.echo(f"  Done: {new_count} new, {skipped} skipped.")
+
+    # Post-run minimum check (evaluated across ALL repos harvested this invocation)
+    for warning in tracker.unmet_minimums(diversity):
+        typer.echo(f"Warning: {warning}", err=True)
 
 
 @app.command()
 def prelabel(
-    candidates_dir: Path = typer.Option(Path("data/candidates"), "--candidates-dir", help="Directory of harvested candidate JSON files."),
-    out_path: Path = typer.Option(Path("data/pre_labels.jsonl"), "--out", help="Output JSONL path for pre-labels."),
+    candidates_dir: Path = typer.Option(Path("data/golden_candidates_v2"), "--candidates-dir", help="Directory of harvested candidate JSON files."),
+    out_path: Path = typer.Option(Path("data/pre_labels_v2.jsonl"), "--out", help="Output JSONL path for pre-labels."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Heuristically pre-label all harvested PR candidates."""
@@ -188,15 +247,21 @@ def prelabel(
 @app.command(name="golden-build")
 def golden_build(
     labels_path: Path = typer.Option(Path("data/golden_labels.jsonl"), "--labels", help="Manual labels JSONL (repo, pr_number, label, notes?)."),
-    candidates_dir: Path = typer.Option(Path("data/candidates"), "--candidates-dir"),
+    candidates_dirs_csv: str = typer.Option(
+        "data/candidates,data/golden_candidates_v2",
+        "--candidates-dirs",
+        help="Comma-separated list of candidate directories to search (in order).",
+    ),
     out_dir: Path = typer.Option(Path("tests/fixtures/golden"), "--out-dir"),
     force: bool = typer.Option(False, "--force", help="Write even if class-balance requirements aren't met."),
 ) -> None:
     """Build the golden test fixture set from manual labels + harvested candidates."""
     from pr_triage.golden import GoldenBuildError, build_golden_set
 
+    candidates_dirs = [Path(p.strip()) for p in candidates_dirs_csv.split(",") if p.strip()]
+
     try:
-        summary = build_golden_set(labels_path, candidates_dir, out_dir, force=force)
+        summary = build_golden_set(labels_path, candidates_dirs, out_dir, force=force)
     except GoldenBuildError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1)
@@ -212,8 +277,8 @@ def golden_build(
 
 @app.command()
 def label(
-    pre_labels: Path = typer.Option(Path("data/pre_labels.jsonl"), "--pre-labels"),
-    candidates_dir: Path = typer.Option(Path("data/candidates"), "--candidates-dir"),
+    pre_labels: Path = typer.Option(Path("data/pre_labels_v2.jsonl"), "--pre-labels"),
+    candidates_dir: Path = typer.Option(Path("data/golden_candidates_v2"), "--candidates-dir"),
     out: Path = typer.Option(Path("data/golden_labels.jsonl"), "--out"),
     queue: str = typer.Option(
         "slop-first",
@@ -243,11 +308,102 @@ def label(
 
     app_path = Path(__file__).parent / "labeler_app.py"
     env = os.environ.copy()
-    env["LABELER_PRE_LABELS"] = str(pre_labels)
-    env["LABELER_CANDIDATES_DIR"] = str(candidates_dir)
-    env["LABELER_OUT"] = str(out)
+    env["LABELER_PRE_LABELS"] = str(pre_labels.resolve())
+    env["LABELER_CANDIDATES_DIR"] = str(candidates_dir.resolve())
+    env["LABELER_OUT"] = str(out.resolve())
     env["LABELER_QUEUE_MODE"] = queue
     env["LABELER_SKIP_MAINTAINER"] = "1" if skip_maintainer_cleanups else "0"
+
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "streamlit", "run", str(app_path)],
+            env=env,
+            check=True,
+        )
+    except FileNotFoundError:
+        typer.echo("Error: streamlit not found. Install with: pip install -e '.[eval]'", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def eval(
+    golden_dir: Path = typer.Option(Path("tests/fixtures/golden"), "--golden-dir"),
+    out_dir: Path = typer.Option(Path("outputs/eval_runs"), "--out-dir"),
+    ablation: str = typer.Option("", "--ablation", help="Critic name to exclude (e.g. slop_signals_critic)."),
+    limit: int = typer.Option(0, "--limit", help="Max entries to evaluate (0 = all)."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    model: str = typer.Option("haiku", "--model", help="Model for critics: 'haiku' (default, cheap) or 'sonnet' (production quality)."),
+) -> None:
+    """Run the eval harness against the golden test set and print metrics."""
+    from pr_triage.claude_client import MODEL_HAIKU, MODEL_SONNET
+    from pr_triage.eval import run_eval
+
+    critic_model = MODEL_SONNET if model.lower().startswith("sonnet") else MODEL_HAIKU
+    typer.echo(f"Running eval on {golden_dir} (critics: {critic_model})…", err=True)
+    try:
+        run = run_eval(
+            golden_dir=golden_dir,
+            out_dir=out_dir,
+            ablation_critic=ablation or None,
+            limit=limit or None,
+            verbose=verbose,
+            critic_model=critic_model,
+        )
+    except RuntimeError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    m = run["metrics"]
+    cost = run.get("cost_usd", 0)
+    typer.echo(f"\nAccuracy: {m['accuracy']:.1%}  ({m['n_correct']}/{m['n_total']})  |  cost: ${cost:.4f}")
+    typer.echo("")
+    typer.echo(f"{'Class':<20} {'Precision':>9} {'Recall':>8} {'F1':>8}")
+    typer.echo("-" * 48)
+    for cls, stats in m["per_class"].items():
+        typer.echo(
+            f"{cls:<20} {stats['precision']:>9.3f} {stats['recall']:>8.3f} {stats['f1']:>8.3f}"
+        )
+    typer.echo("")
+    typer.echo("Confusion matrix (rows=true, cols=predicted):")
+    decisions = ["approve", "request_changes", "reject"]
+    header = f"{'':20}" + "".join(f"{d[:8]:>10}" for d in decisions)
+    typer.echo(header)
+    for true_cls in decisions:
+        row = f"{true_cls:<20}" + "".join(
+            f"{m['confusion_matrix'][true_cls][pred]:>10}" for pred in decisions
+        )
+        typer.echo(row)
+    typer.echo("")
+
+    # Find the most recent output file
+    runs = sorted(out_dir.glob("*.json"), reverse=True)
+    if runs:
+        typer.echo(f"Results saved to {runs[0]}")
+
+
+@app.command()
+def view(
+    run_file: Path = typer.Option(None, "--run", help="Specific eval run JSON (default: latest in outputs/eval_runs/)."),
+) -> None:
+    """Open the Streamlit eval viewer dashboard."""
+    import subprocess
+    import sys
+
+    out_dir = Path("outputs/eval_runs")
+    if run_file is None:
+        runs = sorted(out_dir.glob("*.json"), reverse=True)
+        if not runs:
+            typer.echo("Error: no eval runs found. Run `pr-triage eval` first.", err=True)
+            raise typer.Exit(1)
+        run_file = runs[0]
+
+    if not run_file.exists():
+        typer.echo(f"Error: run file not found: {run_file}", err=True)
+        raise typer.Exit(1)
+
+    app_path = Path(__file__).parent / "eval_viewer_app.py"
+    env = os.environ.copy()
+    env["EVAL_RUN_FILE"] = str(run_file.resolve())
 
     try:
         subprocess.run(
