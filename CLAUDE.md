@@ -17,20 +17,34 @@
 
 ```
 src/pr_triage/
-├── cli.py           # Typer entry point
-├── github_client.py # PyGithub wrapper — all GitHub I/O
-├── claude_client.py # Single gateway for all Claude API calls
-├── state.py         # TriageState Pydantic model
-├── budget.py        # BudgetContext ContextVar + BudgetExceeded
-├── rag.py           # ChromaDB RAG index + sentence-transformers retrieval
+├── cli.py              # Typer entry point
+├── github_client.py    # PyGithub wrapper — all GitHub I/O
+├── claude_client.py    # Single gateway for all Claude API calls; tracks cost_usd
+├── state.py            # TriageState Pydantic model
+├── budget.py           # BudgetContext ContextVar + BudgetExceeded
+├── rag.py              # ChromaDB RAG index + sentence-transformers retrieval
+├── harvest.py          # GitHub PR harvester with DiversityConfig/DiversityTracker
+├── prelabel.py         # Heuristic pre-labeler for golden-set candidates
+├── aggregator.py       # Deterministic multi-critic aggregator (weights, veto rule)
+├── eval.py             # Eval harness: load golden set, run pipeline, compute metrics
+├── labeler_app.py      # Streamlit manual labeling tool (pr-triage label)
+├── eval_viewer_app.py  # Streamlit eval results viewer (pr-triage view)
 └── graph/
-    ├── nodes.py     # LangGraph node functions
-    └── pipeline.py  # StateGraph assembly, run_pipeline(), budget pre-check
+    ├── nodes.py        # LangGraph node functions (classify, 3 critics, aggregate)
+    └── pipeline.py     # StateGraph assembly, run_pipeline(), critic_model override
 ```
+
+## Model routing
+
+- `classify_size` → Haiku (always — simple classification)
+- `guidelines_critic` → Sonnet (production default, cross-references CONTRIBUTING.md chunks)
+- `architecture_critic` → Sonnet (production default, pattern consistency judgment)
+- `slop_signals_critic` → Haiku (production default, heuristics carry most weight)
+- `pr-triage eval` → all critics default to Haiku; use `--model sonnet` for quality check
 
 ## Phase status
 
-- **Phase 1 (done):** repo skeleton, ClaudeClient stub, GitHub PR ingestion, CLI `fetch` command.
+- **Phase 1 (done):** repo skeleton, ClaudeClient stub, GitHub PR ingestion, CLI `fetch`.
 - **Phase 2 (done):** real ClaudeClient, ChromaDB RAG, LangGraph single-critic pipeline, CLI `check` + `index`.
-- **Phase 3 (current):** golden-set construction, multi-critic pipeline (guidelines + architecture + slop_signals), aggregator, eval harness, Streamlit eval viewer.
-- Phase 4: GitHub Action packaging.
+- **Phase 3 (done):** golden-set construction (53 entries, 8 repos), multi-critic pipeline (guidelines + architecture + slop_signals), deterministic aggregator, eval harness + Streamlit viewer, per-critic model split, dollar cost guardrail.
+- **Phase 4:** GitHub Action packaging.
