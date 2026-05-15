@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import urllib.request
+from collections import Counter
+from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timedelta, timezone
 from itertools import islice
 from pathlib import Path
@@ -31,6 +33,93 @@ _BARE_RE = re.compile(r"(?<!\w)#(\d+)")
 _MAX_COMMENTS = 100  # cap per PR to bound file size and API calls
 
 
+# --------------------------------------------------------------------------
+# Diversity constraints
+# --------------------------------------------------------------------------
+
+@dataclass
+class DiversityConfig:
+    """Limits applied during harvest to produce a balanced candidate set."""
+    max_prs_per_author: int = 2
+    max_prs_per_author_repo_pair: int = 2
+    max_prs_per_repo: int = 30
+    min_distinct_authors: int = 15
+    min_distinct_repos: int = 6
+    exclude_authors: list[str] = dc_field(default_factory=list)
+    exclude_bot_authors: bool = True
+
+
+@dataclass
+class DiversityTracker:
+    """Running counts for enforcing DiversityConfig across harvest calls."""
+    author_counts: Counter = dc_field(default_factory=Counter)
+    repo_counts: Counter = dc_field(default_factory=Counter)
+    author_repo_counts: Counter = dc_field(default_factory=Counter)
+
+    @classmethod
+    def from_dir(cls, out_dir: Path) -> "DiversityTracker":
+        """Seed counters from candidate JSON files already present in out_dir."""
+        tracker = cls()
+        if not out_dir.exists():
+            return tracker
+        for f in out_dir.glob("*.json"):
+            try:
+                d = json.loads(f.read_text())
+                author = d.get("author")
+                repo = d.get("repo")
+                if author and repo:
+                    tracker.author_counts[author] += 1
+                    tracker.repo_counts[repo] += 1
+                    tracker.author_repo_counts[(author, repo)] += 1
+            except Exception:
+                pass
+        return tracker
+
+    def check(self, author: str, repo: str, config: DiversityConfig) -> str | None:
+        """Return a skip-reason string if this PR would violate a limit, else None."""
+        if config.exclude_bot_authors and author.endswith("[bot]"):
+            return f"bot_author ({author})"
+        if author in config.exclude_authors:
+            return f"excluded_author ({author})"
+        if self.author_counts[author] >= config.max_prs_per_author:
+            return (
+                f"max_prs_per_author ({author}: "
+                f"{self.author_counts[author]}/{config.max_prs_per_author})"
+            )
+        if self.repo_counts[repo] >= config.max_prs_per_repo:
+            return (
+                f"max_prs_per_repo ({repo}: "
+                f"{self.repo_counts[repo]}/{config.max_prs_per_repo})"
+            )
+        if self.author_repo_counts[(author, repo)] >= config.max_prs_per_author_repo_pair:
+            return (
+                f"max_prs_per_author_repo_pair ({author} @ {repo}: "
+                f"{self.author_repo_counts[(author, repo)]}/{config.max_prs_per_author_repo_pair})"
+            )
+        return None
+
+    def record(self, author: str, repo: str) -> None:
+        """Register a newly saved PR in the running counts."""
+        self.author_counts[author] += 1
+        self.repo_counts[repo] += 1
+        self.author_repo_counts[(author, repo)] += 1
+
+    def unmet_minimums(self, config: DiversityConfig) -> list[str]:
+        """Return warning strings for min-constraints not yet satisfied."""
+        out = []
+        n_authors = len(self.author_counts)
+        n_repos = len(self.repo_counts)
+        if n_authors < config.min_distinct_authors:
+            out.append(
+                f"min_distinct_authors not met: {n_authors} < {config.min_distinct_authors}"
+            )
+        if n_repos < config.min_distinct_repos:
+            out.append(
+                f"min_distinct_repos not met: {n_repos} < {config.min_distinct_repos}"
+            )
+        return out
+
+
 class LinkedIssue(BaseModel):
     number: int
     repo: Optional[str] = None  # None = same repo; "owner/repo" for cross-repo refs
@@ -43,9 +132,8 @@ class PRCandidate(BaseModel):
     title: str
     body: Optional[str] = None
     author: str
-    # TODO: add author_association (MEMBER/OWNER/COLLABORATOR/CONTRIBUTOR/NONE) for the
-    # PR author. Currently only comment-author associations are harvested. Needed to
-    # improve the maintainer-cleanup auto-skip filter in labeler_app.py (issue #phase3).
+    # OWNER/MEMBER/COLLABORATOR/CONTRIBUTOR/NONE — from GitHub's author_association field
+    author_association: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     closed_at: Optional[datetime] = None
@@ -136,6 +224,8 @@ def harvest_repo(
     min_age_days: int = 14,
     re_record: bool = False,
     verbose: bool = False,
+    diversity: DiversityConfig | None = None,
+    tracker: DiversityTracker | None = None,
 ) -> tuple[int, int]:
     """Harvest closed PR candidates from a GitHub repo into per-entry JSON files.
 
@@ -145,6 +235,11 @@ def harvest_repo(
 
     Idempotent: existing files are skipped unless re_record=True.
     PRs closed within min_age_days of now are skipped (settle-time buffer).
+
+    If diversity and tracker are provided, PRs that would violate diversity limits
+    are skipped (with a verbose log line). Already-existing files are NOT re-checked
+    against limits — they were counted when tracker was seeded via from_dir().
+
     Returns (new_count, skipped_count).
     """
     if states is None:
@@ -172,7 +267,8 @@ def harvest_repo(
                 break
 
             dest = candidate_path(out_dir, repo_name, pr.number)
-            if dest.exists() and not re_record:
+            already_exists = dest.exists()
+            if already_exists and not re_record:
                 skipped_count += 1
                 continue
 
@@ -190,6 +286,15 @@ def harvest_repo(
                             )
                         skipped_count += 1
                         continue
+
+            # Diversity check — only applies to files not yet on disk
+            if diversity is not None and tracker is not None and not already_exists:
+                reason = tracker.check(pr.user.login, repo_name, diversity)
+                if reason:
+                    if verbose:
+                        print(f"  skipped PR #{pr.number}: {reason}")
+                    skipped_count += 1
+                    continue
 
             try:
                 files_changed = [f.filename for f in pr.get_files()]
@@ -214,6 +319,7 @@ def harvest_repo(
                 human_ic, bot_ic = _fetch_issue_comments(pr)
                 review_comments = _fetch_review_comments(pr)
                 prior_prs = _count_author_prior_prs(gh, repo_name, pr.user.login, author_cache)
+                author_assoc = pr.raw_data.get("author_association")
 
                 closed_at = _safe_utc(pr.closed_at)
                 merged_at = _safe_utc(pr.merged_at) if pr.merged else None
@@ -224,6 +330,7 @@ def harvest_repo(
                     title=pr.title,
                     body=pr.body,
                     author=pr.user.login,
+                    author_association=author_assoc,
                     created_at=_ensure_utc(pr.created_at),
                     updated_at=_ensure_utc(pr.updated_at),
                     closed_at=closed_at,
@@ -251,6 +358,8 @@ def harvest_repo(
                 }
                 dest.write_text(json.dumps(payload, indent=2))
                 new_count += 1
+                if tracker is not None and not already_exists:
+                    tracker.record(pr.user.login, repo_name)
                 if verbose:
                     print(f"  saved {dest.name}")
 

@@ -75,6 +75,7 @@ def _save_label(repo: str, pr_number: int, label: str, notes: str = "") -> None:
         entry["notes"] = notes
     with _GOLDEN_PATH.open("a") as f:
         f.write(json.dumps(entry) + "\n")
+        f.flush()
 
 
 # ------------------------------------------------------------------
@@ -126,12 +127,20 @@ def _build_queue(entries: list[dict]) -> list[dict]:
 # Maintainer cleanup auto-skip
 # ------------------------------------------------------------------
 
+_MAINTAINER_ASSOC = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
 def _is_maintainer_cleanup(candidate: dict) -> bool:
     prior = candidate.get("author_prior_prs_in_repo")
+    assoc = candidate.get("author_association")
+    # Primary: explicit org role. Fallback: high prior-PR count for repos that
+    # don't return association data or for prolific non-member contributors.
+    is_maintainer = (assoc in _MAINTAINER_ASSOC) or (
+        prior is not None and prior >= _MAINTAINER_PRIOR_PRS_THRESHOLD
+    )
     return (
         not candidate.get("merged", True)
-        and prior is not None
-        and prior >= _MAINTAINER_PRIOR_PRS_THRESHOLD
+        and is_maintainer
         and not candidate.get("issue_comments")
         and not candidate.get("review_comments")
     )
@@ -161,20 +170,39 @@ def _auto_skip_maintainer_cleanups(
 # Session state
 # ------------------------------------------------------------------
 
+def _total_pre_labels() -> int:
+    if not _PRE_LABELS_PATH.exists():
+        return 0
+    return sum(1 for line in _PRE_LABELS_PATH.read_text().splitlines() if line.strip())
+
+
 def _init() -> None:
     if "initialized" in st.session_state:
         return
     labeled = _load_golden()
+    total_pre = _total_pre_labels()
+    already_labeled = len(labeled)
     entries = _load_pre_labels(set(labeled.keys()))
     queue = _build_queue(entries)
     auto_skipped = 0
     if _SKIP_MAINTAINER:
         queue, auto_skipped = _auto_skip_maintainer_cleanups(queue, labeled)
+    first = queue[0] if queue else None
+    if first:
+        startup_msg = (
+            f"{already_labeled} of {total_pre} already labeled, "
+            f"resuming at {first['repo']} #{first['pr_number']} "
+            f"(next unlabeled in {_QUEUE_MODE} queue)"
+        )
+    else:
+        startup_msg = f"{already_labeled} of {total_pre} already labeled — queue complete!"
     st.session_state.labeled = labeled
     st.session_state.queue = queue
     st.session_state.idx = 0
     st.session_state.counts = _count_labels()
     st.session_state.auto_skipped = auto_skipped
+    st.session_state.startup_msg = startup_msg
+    st.session_state.disk_writes = already_labeled
     st.session_state.initialized = True
 
 
@@ -184,12 +212,18 @@ def _do_label(repo: str, pr_number: int, label: str, notes: str = "") -> None:
     if label in st.session_state.counts:
         st.session_state.counts[label] += 1
     st.session_state.idx += 1
+    st.session_state.disk_writes += 1
 
 
-def _do_skip() -> None:
+def _do_skip(notes: str = "") -> None:
     q = st.session_state.queue
     i = st.session_state.idx
-    st.session_state.queue = q[:i] + q[i + 1:] + [q[i]]
+    entry = q[i]
+    _save_label(entry["repo"], entry["pr_number"], "skip", notes)
+    st.session_state.labeled[(entry["repo"], entry["pr_number"])] = "skip"
+    st.session_state.counts["skip"] += 1
+    st.session_state.idx += 1
+    st.session_state.disk_writes += 1
 
 
 # ------------------------------------------------------------------
@@ -291,6 +325,9 @@ counts = st.session_state.counts
 total = len(queue)
 auto_skipped = st.session_state.auto_skipped
 
+st.info(st.session_state.startup_msg)
+st.caption(f"Persisted to disk: {st.session_state.disk_writes} labels  ·  Output: `{_GOLDEN_PATH}`")
+
 if auto_skipped:
     st.info(f"Auto-skipped {auto_skipped} maintainer cleanup PRs (prior_prs ≥ {_MAINTAINER_PRIOR_PRS_THRESHOLD}, no comments, unmerged). Written as 'skip' to output.")
 
@@ -347,8 +384,10 @@ with left:
     m2.metric("Diff", f"+{additions} / -{deletions}")
     m3.metric("Files", changed)
     m4.metric("Closed", closed_at)
+    assoc = candidate.get("author_association") or "unknown"
     st.caption(
         f"Prior PRs in repo: {prior_prs if prior_prs is not None else 'unknown'}"
+        f"  ·  Association: {assoc}"
         f"  ·  Merged: {merged}  ·  Labels: {gh_labels}"
     )
     st.divider()
@@ -417,7 +456,7 @@ with right:
     st.divider()
 
     if st.button("Skip →", use_container_width=True):
-        _do_skip()
+        _do_skip(notes)
         st.rerun()
 
 # Footer — running counts vs targets

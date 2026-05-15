@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pr_triage.harvest import (
+    DiversityConfig,
+    DiversityTracker,
     PRCandidate,
     candidate_path,
     harvest_repo,
@@ -132,12 +134,12 @@ def test_candidate_path_inside_out_dir(tmp_path):
 # Helpers for harvest_repo tests
 # ------------------------------------------------------------------
 
-def _make_fake_pr(number: int, title: str = "PR title", *, closed_at=None) -> MagicMock:
+def _make_fake_pr(number: int, title: str = "PR title", *, closed_at=None, author: str = "alice") -> MagicMock:
     pr = MagicMock()
     pr.number = number
     pr.title = title
     pr.body = None
-    pr.user.login = "alice"
+    pr.user.login = author
     pr.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
     pr.updated_at = datetime(2024, 1, 2, tzinfo=timezone.utc)
     pr.closed_at = closed_at if closed_at is not None else _OLD
@@ -154,8 +156,11 @@ def _make_fake_pr(number: int, title: str = "PR title", *, closed_at=None) -> Ma
     pr.get_files.return_value = []
     pr.get_issue_comments.return_value = []
     pr.get_review_comments.return_value = []
-    # raw_data used for settle-time check
-    pr.raw_data = {"closed_at": _OLD.isoformat() if closed_at is None else (closed_at.isoformat() if closed_at else None)}
+    # raw_data used for settle-time check and author_association
+    pr.raw_data = {
+        "closed_at": _OLD.isoformat() if closed_at is None else (closed_at.isoformat() if closed_at else None),
+        "author_association": "CONTRIBUTOR",
+    }
     return pr
 
 
@@ -208,6 +213,7 @@ def test_harvest_saves_new_pr(tmp_path):
     assert "review_comments" in data
     assert "closed_at" in data
     assert "author_prior_prs_in_repo" in data
+    assert data["author_association"] == "CONTRIBUTOR"
 
 
 def test_harvest_re_record_overwrites(tmp_path):
@@ -434,3 +440,313 @@ def test_harvest_closed_at_stored(tmp_path):
 
     data = json.loads(candidate_path(tmp_path, "owner/repo", 8).read_text())
     assert data["closed_at"] is not None
+
+
+# ------------------------------------------------------------------
+# DiversityTracker.from_dir
+# ------------------------------------------------------------------
+
+def test_diversity_tracker_from_empty_dir(tmp_path):
+    tracker = DiversityTracker.from_dir(tmp_path)
+    assert len(tracker.author_counts) == 0
+    assert len(tracker.repo_counts) == 0
+
+
+def test_diversity_tracker_from_nonexistent_dir(tmp_path):
+    tracker = DiversityTracker.from_dir(tmp_path / "does_not_exist")
+    assert len(tracker.author_counts) == 0
+
+
+def test_diversity_tracker_from_dir_counts(tmp_path):
+    for pr_num, author in [(1, "alice"), (2, "alice"), (3, "bob")]:
+        f = candidate_path(tmp_path, "owner/repo", pr_num)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"repo": "owner/repo", "author": author, "pr_number": pr_num}))
+
+    tracker = DiversityTracker.from_dir(tmp_path)
+    assert tracker.author_counts["alice"] == 2
+    assert tracker.author_counts["bob"] == 1
+    assert tracker.repo_counts["owner/repo"] == 3
+    assert tracker.author_repo_counts[("alice", "owner/repo")] == 2
+    assert tracker.author_repo_counts[("bob", "owner/repo")] == 1
+
+
+def test_diversity_tracker_from_dir_skips_malformed(tmp_path):
+    (tmp_path / "bad.json").write_text("not json at all")
+    # Should not raise; malformed file is silently skipped
+    tracker = DiversityTracker.from_dir(tmp_path)
+    assert len(tracker.author_counts) == 0
+
+
+# ------------------------------------------------------------------
+# DiversityTracker.check
+# ------------------------------------------------------------------
+
+def test_diversity_check_passes_clean_pr():
+    config = DiversityConfig(max_prs_per_author=2, max_prs_per_repo=10, max_prs_per_author_repo_pair=2)
+    tracker = DiversityTracker()
+    assert tracker.check("alice", "owner/repo", config) is None
+
+
+def test_diversity_check_max_prs_per_author():
+    config = DiversityConfig(max_prs_per_author=2)
+    tracker = DiversityTracker()
+    tracker.author_counts["alice"] = 2
+    reason = tracker.check("alice", "owner/repo", config)
+    assert reason is not None
+    assert "max_prs_per_author" in reason
+    assert "alice" in reason
+
+
+def test_diversity_check_max_prs_per_repo():
+    config = DiversityConfig(max_prs_per_repo=5)
+    tracker = DiversityTracker()
+    tracker.repo_counts["owner/repo"] = 5
+    reason = tracker.check("alice", "owner/repo", config)
+    assert reason is not None
+    assert "max_prs_per_repo" in reason
+
+
+def test_diversity_check_max_prs_per_author_repo_pair():
+    config = DiversityConfig(max_prs_per_author_repo_pair=2)
+    tracker = DiversityTracker()
+    tracker.author_repo_counts[("alice", "owner/repo")] = 2
+    reason = tracker.check("alice", "owner/repo", config)
+    assert reason is not None
+    assert "max_prs_per_author_repo_pair" in reason
+
+
+def test_diversity_check_exclude_authors():
+    config = DiversityConfig(exclude_authors=["spammer"])
+    tracker = DiversityTracker()
+    reason = tracker.check("spammer", "owner/repo", config)
+    assert reason is not None
+    assert "excluded_author" in reason
+
+
+def test_diversity_check_exclude_bot_authors():
+    config = DiversityConfig(exclude_bot_authors=True)
+    tracker = DiversityTracker()
+    reason = tracker.check("ci-bot[bot]", "owner/repo", config)
+    assert reason is not None
+    assert "bot_author" in reason
+
+
+def test_diversity_check_bots_allowed_when_flag_off():
+    config = DiversityConfig(exclude_bot_authors=False)
+    tracker = DiversityTracker()
+    assert tracker.check("ci-bot[bot]", "owner/repo", config) is None
+
+
+# ------------------------------------------------------------------
+# DiversityTracker.unmet_minimums
+# ------------------------------------------------------------------
+
+def test_diversity_unmet_minimums_both_met():
+    config = DiversityConfig(min_distinct_authors=2, min_distinct_repos=1)
+    tracker = DiversityTracker()
+    tracker.author_counts.update(["alice", "bob"])
+    tracker.repo_counts["owner/repo"] = 2
+    assert tracker.unmet_minimums(config) == []
+
+
+def test_diversity_unmet_minimums_authors_short():
+    config = DiversityConfig(min_distinct_authors=5, min_distinct_repos=1)
+    tracker = DiversityTracker()
+    tracker.author_counts["alice"] = 1
+    tracker.repo_counts["owner/repo"] = 1
+    warnings = tracker.unmet_minimums(config)
+    assert len(warnings) == 1
+    assert "min_distinct_authors" in warnings[0]
+
+
+def test_diversity_unmet_minimums_repos_short():
+    config = DiversityConfig(min_distinct_authors=1, min_distinct_repos=3)
+    tracker = DiversityTracker()
+    tracker.author_counts["alice"] = 1
+    tracker.repo_counts["owner/repo"] = 1
+    warnings = tracker.unmet_minimums(config)
+    assert len(warnings) == 1
+    assert "min_distinct_repos" in warnings[0]
+
+
+# ------------------------------------------------------------------
+# harvest_repo — diversity integration
+# ------------------------------------------------------------------
+
+def test_diversity_harvest_author_cap(tmp_path):
+    config = DiversityConfig(max_prs_per_author=2)
+    tracker = DiversityTracker()
+    tracker.author_counts["alice"] = 2  # already at cap
+
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, [_make_fake_pr(1, author="alice")])
+        new_count, skipped = harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert new_count == 0
+    assert not candidate_path(tmp_path, "owner/repo", 1).exists()
+
+
+def test_diversity_harvest_repo_cap(tmp_path):
+    config = DiversityConfig(max_prs_per_repo=1)
+    tracker = DiversityTracker()
+    tracker.repo_counts["owner/repo"] = 1  # already at cap
+
+    prs = [_make_fake_pr(i, author=f"user{i}") for i in range(1, 4)]
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, prs)
+        new_count, _ = harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert new_count == 0
+
+
+def test_diversity_harvest_author_repo_pair_cap(tmp_path):
+    config = DiversityConfig(max_prs_per_author_repo_pair=1)
+    tracker = DiversityTracker()
+    tracker.author_repo_counts[("alice", "owner/repo")] = 1
+
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, [_make_fake_pr(10, author="alice")])
+        new_count, _ = harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert new_count == 0
+
+
+def test_diversity_harvest_different_authors_all_pass(tmp_path):
+    config = DiversityConfig(max_prs_per_author=1)
+    tracker = DiversityTracker()
+
+    prs = [_make_fake_pr(i, author=f"user{i}") for i in range(1, 4)]
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, prs)
+        new_count, _ = harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert new_count == 3
+    assert tracker.author_counts["user1"] == 1
+    assert tracker.author_counts["user2"] == 1
+    assert tracker.author_counts["user3"] == 1
+
+
+def test_diversity_harvest_tracker_updated_after_save(tmp_path):
+    config = DiversityConfig(max_prs_per_author=2)
+    tracker = DiversityTracker()
+
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, [_make_fake_pr(1, author="alice")])
+        harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert tracker.author_counts["alice"] == 1
+    assert tracker.repo_counts["owner/repo"] == 1
+    assert tracker.author_repo_counts[("alice", "owner/repo")] == 1
+
+
+def test_diversity_harvest_existing_files_count_against_limits(tmp_path):
+    # Pre-write 2 files for alice — simulates a previous run
+    for pr_num in [1, 2]:
+        f = candidate_path(tmp_path, "owner/repo", pr_num)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"repo": "owner/repo", "author": "alice", "pr_number": pr_num}))
+
+    config = DiversityConfig(max_prs_per_author=2)
+    tracker = DiversityTracker.from_dir(tmp_path)
+    assert tracker.author_counts["alice"] == 2
+
+    # PR #3 is new but alice is already at the cap
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, [_make_fake_pr(3, author="alice")])
+        new_count, skipped = harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert new_count == 0
+    assert skipped == 1
+    assert not candidate_path(tmp_path, "owner/repo", 3).exists()
+
+
+def test_diversity_harvest_no_config_unchanged_behavior(tmp_path):
+    # Without diversity args, harvest_repo behaves exactly as before
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, [_make_fake_pr(99, author="alice")], search_total=1)
+        new_count, _ = harvest_repo("owner/repo", "token", tmp_path, states=["closed"])
+
+    assert new_count == 1
+    assert candidate_path(tmp_path, "owner/repo", 99).exists()
+
+
+def test_diversity_harvest_exclude_author(tmp_path):
+    config = DiversityConfig(exclude_authors=["spammer"])
+    tracker = DiversityTracker()
+
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, [_make_fake_pr(5, author="spammer")])
+        new_count, _ = harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert new_count == 0
+    assert not candidate_path(tmp_path, "owner/repo", 5).exists()
+
+
+def test_diversity_harvest_exclude_bot_author(tmp_path):
+    config = DiversityConfig(exclude_bot_authors=True)
+    tracker = DiversityTracker()
+
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, [_make_fake_pr(6, author="renovate[bot]")])
+        new_count, _ = harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert new_count == 0
+
+
+def test_diversity_harvest_mixed_authors_caps_correctly(tmp_path):
+    # alice gets 1 PR (cap=1), bob gets 2 PRs (cap=2)
+    config = DiversityConfig(max_prs_per_author=1, max_prs_per_author_repo_pair=2, max_prs_per_repo=10)
+    tracker = DiversityTracker()
+
+    prs = [
+        _make_fake_pr(1, author="alice"),
+        _make_fake_pr(2, author="alice"),  # should be capped
+        _make_fake_pr(3, author="bob"),
+    ]
+    with patch("pr_triage.harvest.Github") as mock_gh, \
+         patch("pr_triage.harvest._fetch_diff", return_value=None):
+        _setup_mock_gh(mock_gh, prs)
+        new_count, skipped = harvest_repo(
+            "owner/repo", "token", tmp_path, states=["closed"],
+            diversity=config, tracker=tracker,
+        )
+
+    assert new_count == 2  # alice#1 + bob#3
+    assert skipped == 1    # alice#2 capped
+    assert candidate_path(tmp_path, "owner/repo", 1).exists()
+    assert not candidate_path(tmp_path, "owner/repo", 2).exists()
+    assert candidate_path(tmp_path, "owner/repo", 3).exists()
