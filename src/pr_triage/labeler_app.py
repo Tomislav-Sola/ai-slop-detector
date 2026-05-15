@@ -16,20 +16,25 @@ import streamlit.components.v1 as components
 _PRE_LABELS_PATH = Path(os.environ.get("LABELER_PRE_LABELS", "data/pre_labels.jsonl"))
 _CANDIDATES_DIR = Path(os.environ.get("LABELER_CANDIDATES_DIR", "data/candidates"))
 _GOLDEN_PATH = Path(os.environ.get("LABELER_OUT", "data/golden_labels.jsonl"))
+_QUEUE_MODE = os.environ.get("LABELER_QUEUE_MODE", "slop-first")
+_SKIP_MAINTAINER = os.environ.get("LABELER_SKIP_MAINTAINER", "0") == "1"
 
 _CONF_RANK = {"unclear": 0, "low": 1, "medium": 2, "high": 3}
-_PRE_TO_GOLDEN: dict[str, str] = {
-    "accepted": "approve",
-    "rejected_quality": "request_changes",
-    "slop": "reject",
+
+# Pre-label → golden label (now 1:1 — canonical names match throughout)
+_PRE_TO_LABEL: dict[str, str] = {
+    "accepted": "accepted",
+    "rejected_quality": "rejected_quality",
+    "slop": "slop",
 }
+_LABEL_EMOJI = {"accepted": "✅", "rejected_quality": "🔄", "slop": "🗑️", "skip": "⏭️"}
 _SIGNAL_LABELS = {
     "ai_disclosure_or_mention": "🤖 ai_disclosure_or_mention",
     "silent_slop_pattern": "🔇 silent_slop_pattern",
     "maintainer_explicit_rejection": "🚫 maintainer_explicit_rejection",
 }
-_GOLDEN_EMOJI = {"approve": "✅", "request_changes": "🔄", "reject": "🗑️"}
 _MAX_DIFF_LINES = 500
+_MAINTAINER_PRIOR_PRS_THRESHOLD = 50
 
 
 # ------------------------------------------------------------------
@@ -46,25 +51,6 @@ def _load_golden() -> dict[tuple[str, int], str]:
     return out
 
 
-def _build_queue(labeled: set[tuple[str, int]]) -> list[dict]:
-    entries: list[dict] = []
-    if not _PRE_LABELS_PATH.exists():
-        return entries
-    for line in _PRE_LABELS_PATH.read_text().splitlines():
-        if line.strip():
-            e = json.loads(line)
-            if (e["repo"], e["pr_number"]) not in labeled:
-                entries.append(e)
-
-    def _rank(e: dict) -> int:
-        if e["label"] == "unclear":
-            return 0
-        return _CONF_RANK.get(e.get("confidence", "low"), 1)
-
-    entries.sort(key=_rank)
-    return entries
-
-
 def _load_candidate(entry: dict) -> dict:
     safe = entry["repo"].replace("/", "__")
     path = _CANDIDATES_DIR / f"{safe}_pr{entry['pr_number']}.json"
@@ -72,7 +58,7 @@ def _load_candidate(entry: dict) -> dict:
 
 
 def _count_labels() -> dict[str, int]:
-    counts: dict[str, int] = {"approve": 0, "request_changes": 0, "reject": 0}
+    counts: dict[str, int] = {"accepted": 0, "rejected_quality": 0, "slop": 0, "skip": 0}
     if _GOLDEN_PATH.exists():
         for line in _GOLDEN_PATH.read_text().splitlines():
             if line.strip():
@@ -92,6 +78,86 @@ def _save_label(repo: str, pr_number: int, label: str, notes: str = "") -> None:
 
 
 # ------------------------------------------------------------------
+# Queue construction
+# ------------------------------------------------------------------
+
+def _load_pre_labels(labeled: set[tuple[str, int]]) -> list[dict]:
+    entries: list[dict] = []
+    if not _PRE_LABELS_PATH.exists():
+        return entries
+    for line in _PRE_LABELS_PATH.read_text().splitlines():
+        if line.strip():
+            e = json.loads(line)
+            if (e["repo"], e["pr_number"]) not in labeled:
+                entries.append(e)
+    return entries
+
+
+def _sort_slop_first(entries: list[dict]) -> list[dict]:
+    slop = [e for e in entries if e["label"] == "slop"]
+    slop.sort(key=lambda e: (
+        -len(e.get("signals", [])),
+        -_CONF_RANK.get(e.get("confidence", "low"), 1),
+    ))
+    rq = [e for e in entries if e["label"] == "rejected_quality"]
+    rq.sort(key=lambda e: -_CONF_RANK.get(e.get("confidence", "low"), 1))
+    acc = [e for e in entries if e["label"] == "accepted"]
+    unc = [e for e in entries if e["label"] == "unclear"]
+    return slop + rq + acc + unc
+
+
+def _sort_confidence_asc(entries: list[dict]) -> list[dict]:
+    def _rank(e: dict) -> int:
+        return 0 if e["label"] == "unclear" else _CONF_RANK.get(e.get("confidence", "low"), 1)
+    return sorted(entries, key=_rank)
+
+
+def _build_queue(entries: list[dict]) -> list[dict]:
+    mode = _QUEUE_MODE
+    if mode.startswith("label="):
+        target = mode.split("=", 1)[1].strip()
+        return [e for e in entries if e["label"] == target]
+    if mode == "confidence-asc":
+        return _sort_confidence_asc(entries)
+    return _sort_slop_first(entries)  # default: slop-first
+
+
+# ------------------------------------------------------------------
+# Maintainer cleanup auto-skip
+# ------------------------------------------------------------------
+
+def _is_maintainer_cleanup(candidate: dict) -> bool:
+    prior = candidate.get("author_prior_prs_in_repo")
+    return (
+        not candidate.get("merged", True)
+        and prior is not None
+        and prior >= _MAINTAINER_PRIOR_PRS_THRESHOLD
+        and not candidate.get("issue_comments")
+        and not candidate.get("review_comments")
+    )
+
+
+def _auto_skip_maintainer_cleanups(
+    queue: list[dict], labeled: dict[tuple[str, int], str]
+) -> tuple[list[dict], int]:
+    remaining: list[dict] = []
+    auto_skipped = 0
+    for entry in queue:
+        candidate = _load_candidate(entry)
+        # Never auto-skip slop-flagged PRs — a high-prior-prs author triggering a slop
+        # signal is either a critical false positive or a maintainer mistake; both are
+        # eval-relevant calibration cases that need manual review.
+        if _is_maintainer_cleanup(candidate) and entry["label"] != "slop":
+            key = (entry["repo"], entry["pr_number"])
+            _save_label(entry["repo"], entry["pr_number"], "skip", "maintainer_cleanup_auto_skip")
+            labeled[key] = "skip"
+            auto_skipped += 1
+        else:
+            remaining.append(entry)
+    return remaining, auto_skipped
+
+
+# ------------------------------------------------------------------
 # Session state
 # ------------------------------------------------------------------
 
@@ -99,26 +165,31 @@ def _init() -> None:
     if "initialized" in st.session_state:
         return
     labeled = _load_golden()
+    entries = _load_pre_labels(set(labeled.keys()))
+    queue = _build_queue(entries)
+    auto_skipped = 0
+    if _SKIP_MAINTAINER:
+        queue, auto_skipped = _auto_skip_maintainer_cleanups(queue, labeled)
     st.session_state.labeled = labeled
-    st.session_state.queue = _build_queue(set(labeled.keys()))
+    st.session_state.queue = queue
     st.session_state.idx = 0
     st.session_state.counts = _count_labels()
+    st.session_state.auto_skipped = auto_skipped
     st.session_state.initialized = True
 
 
-def _do_label(repo: str, pr_number: int, golden_label: str, notes: str = "") -> None:
-    _save_label(repo, pr_number, golden_label, notes)
-    st.session_state.labeled[(repo, pr_number)] = golden_label
-    if golden_label in st.session_state.counts:
-        st.session_state.counts[golden_label] += 1
+def _do_label(repo: str, pr_number: int, label: str, notes: str = "") -> None:
+    _save_label(repo, pr_number, label, notes)
+    st.session_state.labeled[(repo, pr_number)] = label
+    if label in st.session_state.counts:
+        st.session_state.counts[label] += 1
     st.session_state.idx += 1
 
 
 def _do_skip() -> None:
     q = st.session_state.queue
     i = st.session_state.idx
-    item = q[i]
-    st.session_state.queue = q[:i] + q[i + 1:] + [item]
+    st.session_state.queue = q[:i] + q[i + 1:] + [q[i]]
 
 
 # ------------------------------------------------------------------
@@ -137,7 +208,7 @@ def _keyboard_js() -> None:
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         const map = {
             'a': 'Accept suggestion',
-            'r': 'reject',
+            'r': 'slop',
             's': 'Skip',
         };
         const needle = map[e.key.toLowerCase()];
@@ -181,11 +252,11 @@ def _render_comments(candidate: dict) -> None:
     for kind, c in all_c:
         assoc = c.get("author_association", "NONE")
         user = c.get("user", "?")
-        body = (c.get("body") or "")[:800]
+        body = c.get("body") or ""
         created = (c.get("created_at") or "")[:10]
         tag = f"[{assoc}]" if assoc not in ("NONE", "") else ""
         st.markdown(f"**{user}** {tag} · *{kind}* · {created}")
-        st.markdown(body + ("…" if len(c.get("body") or "") > 800 else ""))
+        st.markdown(body[:800] + ("…" if len(body) > 800 else ""))
         st.divider()
 
 
@@ -195,6 +266,15 @@ def _prelabel_badge(pre_label: str, confidence: str) -> str:
     if pre_label == "unclear":
         return f"{icon} **unclear** — no confident signal"
     return f"{icon} **{pre_label}** ({confidence} confidence)"
+
+
+def _progress_text(idx: int, total: int, counts: dict) -> str:
+    c = counts
+    return (
+        f"PR {idx + 1}/{total} in queue  |  labeled so far: "
+        f"slop={c['slop']}  rejected_quality={c['rejected_quality']}  "
+        f"accepted={c['accepted']}  skip={c['skip']}"
+    )
 
 
 # ------------------------------------------------------------------
@@ -209,14 +289,19 @@ queue = st.session_state.queue
 idx = st.session_state.idx
 counts = st.session_state.counts
 total = len(queue)
+auto_skipped = st.session_state.auto_skipped
+
+if auto_skipped:
+    st.info(f"Auto-skipped {auto_skipped} maintainer cleanup PRs (prior_prs ≥ {_MAINTAINER_PRIOR_PRS_THRESHOLD}, no comments, unmerged). Written as 'skip' to output.")
 
 # Done screen
 if idx >= total:
-    st.success(f"Queue complete — {sum(counts.values())} PRs labeled.")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("✅ approve", counts["approve"])
-    c2.metric("🔄 request_changes", counts["request_changes"])
-    c3.metric("🗑️ reject", counts["reject"])
+    st.success(f"Queue complete — {sum(c for k, c in counts.items() if k != 'skip')} PRs labeled (plus {counts['skip']} skipped).")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("✅ accepted", counts["accepted"])
+    c2.metric("🔄 rejected_quality", counts["rejected_quality"])
+    c3.metric("🗑️ slop", counts["slop"])
+    c4.metric("⏭️ skip", counts["skip"])
     st.info("Run `pr-triage golden-build` to write the golden fixtures.")
     if st.button("Restart (re-review skipped PRs)"):
         del st.session_state["initialized"]
@@ -229,12 +314,15 @@ pr_number = entry["pr_number"]
 pre_label = entry["label"]
 confidence = entry.get("confidence", "low")
 signals = entry.get("signals", [])
-suggested_golden = _PRE_TO_GOLDEN.get(pre_label)
+suggested_label = _PRE_TO_LABEL.get(pre_label)
 
 candidate = _load_candidate(entry)
 
 # Progress bar
-st.progress(idx / max(total, 1), text=f"PR {idx + 1} / {total}  ·  labeled: {sum(counts.values())}")
+st.progress(
+    idx / max(total, 1),
+    text=_progress_text(idx, total, counts),
+)
 
 # Title / link
 pr_url = f"https://github.com/{repo}/pull/{pr_number}"
@@ -296,34 +384,34 @@ with right:
     notes = st.text_input(
         "Notes (optional)",
         key=f"notes_{idx}",
-        placeholder="reason for override, edge case observation…",
+        placeholder="reason for override, edge case…",
     )
 
-    st.markdown("**Actions** · `a` accept · `r` reject · `s` skip")
+    st.markdown("**Actions** · `a` accept · `r` slop · `s` skip")
 
-    if suggested_golden:
-        emoji = _GOLDEN_EMOJI.get(suggested_golden, "")
+    if suggested_label:
+        emoji = _LABEL_EMOJI.get(suggested_label, "")
         if st.button(
-            f"Accept suggestion  →  {emoji} {suggested_golden}",
+            f"Accept suggestion  →  {emoji} {suggested_label}",
             type="primary",
             use_container_width=True,
         ):
-            _do_label(repo, pr_number, suggested_golden, notes)
+            _do_label(repo, pr_number, suggested_label, notes)
             st.rerun()
 
     st.markdown("**Override:**")
     ov1, ov2, ov3 = st.columns(3)
     with ov1:
-        if st.button("✅ approve", use_container_width=True, key="btn_approve"):
-            _do_label(repo, pr_number, "approve", notes)
+        if st.button("✅ accepted", use_container_width=True, key="btn_accepted"):
+            _do_label(repo, pr_number, "accepted", notes)
             st.rerun()
     with ov2:
-        if st.button("🔄 request_changes", use_container_width=True, key="btn_rc"):
-            _do_label(repo, pr_number, "request_changes", notes)
+        if st.button("🔄 rejected_quality", use_container_width=True, key="btn_rq"):
+            _do_label(repo, pr_number, "rejected_quality", notes)
             st.rerun()
     with ov3:
-        if st.button("🗑️ reject", use_container_width=True, key="btn_reject"):
-            _do_label(repo, pr_number, "reject", notes)
+        if st.button("🗑️ slop", use_container_width=True, key="btn_slop"):
+            _do_label(repo, pr_number, "slop", notes)
             st.rerun()
 
     st.divider()
@@ -332,11 +420,11 @@ with right:
         _do_skip()
         st.rerun()
 
-# Footer — running counts
+# Footer — running counts vs targets
 st.divider()
 f1, f2, f3, f4, f5 = st.columns(5)
-f1.metric("✅ approve", counts["approve"], delta=f"target 20, {max(20 - counts['approve'], 0)} left")
-f2.metric("🔄 request_changes", counts["request_changes"], delta=f"target 20, {max(20 - counts['request_changes'], 0)} left")
-f3.metric("🗑️ reject", counts["reject"], delta=f"target 10, {max(10 - counts['reject'], 0)} left")
-f4.metric("Total labeled", sum(counts.values()))
+f1.metric("✅ accepted", counts["accepted"], delta=f"target 20, {max(20 - counts['accepted'], 0)} left")
+f2.metric("🔄 rejected_quality", counts["rejected_quality"], delta=f"target 20, {max(20 - counts['rejected_quality'], 0)} left")
+f3.metric("🗑️ slop", counts["slop"], delta=f"target 10, {max(10 - counts['slop'], 0)} left")
+f4.metric("⏭️ skip", counts["skip"])
 f5.metric("Queue remaining", total - idx)

@@ -5,7 +5,8 @@ from pathlib import Path
 
 _MIN_TOTAL = 30
 _MIN_PER_CLASS = 5
-_VALID_LABELS = frozenset({"approve", "request_changes", "reject"})
+_VALID_LABELS = frozenset({"accepted", "rejected_quality", "slop"})
+_SKIP_LABEL = "skip"
 
 
 class GoldenBuildError(Exception):
@@ -24,16 +25,17 @@ def build_golden_set(
     """Merge manual labels with harvested candidate data into golden fixture files.
 
     Each entry in labels_path (JSONL) must have at minimum:
-      { "repo": "owner/repo", "pr_number": 7, "label": "approve" }
+      { "repo": "owner/repo", "pr_number": 7, "label": "accepted" }
 
+    Entries with label "skip" are silently ignored (not written, not counted).
     Matching candidate files are read from candidates_dir.
     Per-entry golden JSON files are written to out_dir.
 
-    Returns a summary dict: { "total": N, "approve": N, "request_changes": N, "reject": N }
+    Returns a summary dict: { "total": N, "accepted": N, "rejected_quality": N, "slop": N }
 
     Raises GoldenBuildError if:
     - labels_path does not exist
-    - any label is not in VALID_LABELS
+    - any label is not in VALID_LABELS (and not "skip")
     - total < min_total (unless force=True)
     - any class has < min_per_class entries (unless force=True)
     - a referenced candidate file is missing
@@ -53,6 +55,8 @@ def build_golden_set(
                 raise GoldenBuildError(f"Invalid JSON on line {lineno}: {exc}") from exc
             if "label" not in entry:
                 raise GoldenBuildError(f"Missing 'label' field on line {lineno}: {entry}")
+            if entry["label"] == _SKIP_LABEL:
+                continue  # silently exclude skipped entries
             if entry["label"] not in _VALID_LABELS:
                 raise GoldenBuildError(
                     f"Invalid label '{entry['label']}' on line {lineno} "
@@ -60,7 +64,7 @@ def build_golden_set(
                 )
             labels.append(entry)
 
-    class_counts: dict[str, int] = {"approve": 0, "request_changes": 0, "reject": 0}
+    class_counts: dict[str, int] = {"accepted": 0, "rejected_quality": 0, "slop": 0}
     for entry in labels:
         class_counts[entry["label"]] += 1
 

@@ -43,6 +43,9 @@ class PRCandidate(BaseModel):
     title: str
     body: Optional[str] = None
     author: str
+    # TODO: add author_association (MEMBER/OWNER/COLLABORATOR/CONTRIBUTOR/NONE) for the
+    # PR author. Currently only comment-author associations are harvested. Needed to
+    # improve the maintainer-cleanup auto-skip filter in labeler_app.py (issue #phase3).
     created_at: datetime
     updated_at: datetime
     closed_at: Optional[datetime] = None

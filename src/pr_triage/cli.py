@@ -204,9 +204,9 @@ def golden_build(
     typer.echo(
         f"Golden set written to {out_dir}: "
         f"{summary['total']} total "
-        f"({summary['approve']} approve, "
-        f"{summary['request_changes']} request_changes, "
-        f"{summary['reject']} reject)"
+        f"({summary['accepted']} accepted, "
+        f"{summary['rejected_quality']} rejected_quality, "
+        f"{summary['slop']} slop)"
     )
 
 
@@ -215,6 +215,23 @@ def label(
     pre_labels: Path = typer.Option(Path("data/pre_labels.jsonl"), "--pre-labels"),
     candidates_dir: Path = typer.Option(Path("data/candidates"), "--candidates-dir"),
     out: Path = typer.Option(Path("data/golden_labels.jsonl"), "--out"),
+    queue: str = typer.Option(
+        "slop-first",
+        "--queue",
+        help=(
+            "Queue ordering. Options: 'slop-first' (default: slop by signal count desc, "
+            "then rejected_quality, accepted, unclear), 'confidence-asc' (hardest first), "
+            "'label=<name>' (single class only, e.g. --queue label=slop)."
+        ),
+    ),
+    skip_maintainer_cleanups: bool = typer.Option(
+        False,
+        "--skip-maintainer-cleanups",
+        help=(
+            "Auto-skip PRs that look like maintainer cleanups "
+            "(merged=false, prior_prs>=50, no comments). Written as 'skip' to the output."
+        ),
+    ),
 ) -> None:
     """Launch the Streamlit manual labeling tool."""
     import subprocess
@@ -229,6 +246,8 @@ def label(
     env["LABELER_PRE_LABELS"] = str(pre_labels)
     env["LABELER_CANDIDATES_DIR"] = str(candidates_dir)
     env["LABELER_OUT"] = str(out)
+    env["LABELER_QUEUE_MODE"] = queue
+    env["LABELER_SKIP_MAINTAINER"] = "1" if skip_maintainer_cleanups else "0"
 
     try:
         subprocess.run(

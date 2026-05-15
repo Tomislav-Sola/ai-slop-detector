@@ -384,7 +384,7 @@ def test_golden_build_exits_on_error(tmp_path):
 
 def test_golden_build_happy_path(tmp_path):
     with patch("pr_triage.golden.build_golden_set", return_value={
-        "total": 30, "approve": 10, "request_changes": 15, "reject": 5,
+        "total": 30, "accepted": 10, "rejected_quality": 15, "slop": 5,
     }):
         result = runner.invoke(
             app,
