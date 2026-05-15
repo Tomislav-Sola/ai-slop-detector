@@ -5,7 +5,14 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pr_triage.state import CriticOutput, GuidelinesCriticOutput, GuidelinesFinding, Verdict
+from pr_triage.state import (
+    AggregateResult,
+    CriticOutput,
+    GuidelinesCriticOutput,
+    GuidelinesFinding,
+    SloppinessFeatures,
+    Verdict,
+)
 
 if TYPE_CHECKING:
     from pr_triage.claude_client import ClaudeClient
@@ -139,8 +146,8 @@ def retrieve_context_node(state: TriageState, rag: RAGIndex) -> dict:
 # Node: guidelines_critic
 # ------------------------------------------------------------------
 
-def guidelines_critic_node(state: TriageState, claude: ClaudeClient) -> dict:
-    """Run the Sonnet guidelines critic and return structured findings."""
+def guidelines_critic_node(state: TriageState, claude: ClaudeClient, *, model: str | None = None) -> dict:
+    """Guidelines critic — Sonnet in production, overridable for eval."""
     from pr_triage.claude_client import MODEL_SONNET
 
     chunks_text = "\n\n".join(state.rag_chunks) if state.rag_chunks else "(no guideline context retrieved)"
@@ -155,7 +162,7 @@ def guidelines_critic_node(state: TriageState, claude: ClaudeClient) -> dict:
 
     raw = claude.complete(
         messages=[{"role": "user", "content": user_msg}],
-        model=MODEL_SONNET,
+        model=model or MODEL_SONNET,
         max_tokens=2048,
         system=_CRITIC_SYSTEM,
     )
@@ -211,60 +218,245 @@ def _parse_critic_json(raw: str) -> GuidelinesCriticOutput:
 
 
 # ------------------------------------------------------------------
-# Node: emit_verdict
+# Node: architecture_critic (B1)
 # ------------------------------------------------------------------
 
-def emit_verdict_node(state: TriageState) -> dict:
-    """Aggregate critic outputs (or trivial fast-path) into a final Verdict."""
-    if state.size_classification == "trivial":
-        return {
-            "aggregate_verdict": Verdict(
-                decision="approve",
-                summary="Trivial changeset (docs/config only or <10 lines). No critic run.",
-                confidence=1.0,
-            )
-        }
+_ARCH_CRITIC_SYSTEM = """\
+You are an architecture reviewer evaluating whether this PR fits the project's existing patterns.
 
-    if not state.critic_outputs:
-        return {
-            "aggregate_verdict": Verdict(
-                decision="request_changes",
-                summary="Critic pipeline produced no output.",
-                confidence=0.0,
-            )
-        }
+Given the diff and retrieved context (recent merged PRs, contributing guidelines), assess:
+1. Does the change follow established naming conventions, module structure, and abstractions?
+2. Is the abstraction level appropriate for the problem size (no over-engineering, no under-abstraction)?
+3. Are new patterns introduced where existing ones already cover the need?
+4. Are there architectural smells: unused code paths, premature generalization, dead code added?
 
-    guidelines = next(
-        (c for c in state.critic_outputs if c.critic_name == "guidelines_critic"),
-        None,
+Return ONLY valid JSON (no markdown fences, no prose):
+{
+  "score": <integer 0-10>,
+  "findings": [
+    {
+      "severity": "critical" | "major" | "minor" | "info",
+      "category": "<string>",
+      "evidence": "<exact quote from diff or context>"
+    }
+  ],
+  "citations": ["<chunk_id>", ...]
+}
+score 10 = architecture fully consistent with codebase; 0 = fundamentally misaligned.
+"""
+
+
+def architecture_critic_node(state: TriageState, claude: ClaudeClient, *, model: str | None = None) -> dict:
+    """Architecture critic — Sonnet in production, overridable for eval."""
+    from pr_triage.claude_client import MODEL_SONNET
+
+    chunks_text = "\n\n".join(state.rag_chunks) if state.rag_chunks else "(no context retrieved)"
+    diff_preview = (state.raw_diff or "")[:6000]
+
+    user_msg = (
+        f"PR #{state.metadata.number}: {state.metadata.title}\n\n"
+        f"PR Description:\n{state.metadata.body or '(none)'}\n\n"
+        f"Files changed: {', '.join(state.files_changed[:20])}\n\n"
+        f"Diff (first 6000 chars):\n{diff_preview}\n\n"
+        f"Retrieved project context:\n{chunks_text}"
     )
-    if guidelines is None:
-        return {
-            "aggregate_verdict": Verdict(
-                decision="request_changes",
-                summary="Guidelines critic output not found.",
-                confidence=0.0,
-            )
-        }
 
-    decision = {
-        "pass": "approve",
-        "needs_review": "request_changes",
-        "fail": "reject",
-    }.get(guidelines.verdict, "request_changes")
+    raw = claude.complete(
+        messages=[{"role": "user", "content": user_msg}],
+        model=model or MODEL_SONNET,
+        max_tokens=2048,
+        system=_ARCH_CRITIC_SYSTEM,
+    )
 
-    score = guidelines.details.score if guidelines.details else 0
-    n_findings = len(guidelines.details.findings) if guidelines.details else 0
-    n_citations = len(guidelines.details.citations) if guidelines.details else 0
+    details = _parse_critic_json(raw)
+    score = details.score
+    verdict_str = "pass" if score >= 8 else "needs_review" if score >= 5 else "fail"
 
-    summary = (
-        f"Guidelines critic: {score}/10 ({guidelines.verdict}). "
-        f"{n_findings} finding(s), {n_citations} citation(s)."
+    output = CriticOutput(
+        critic_name="architecture_critic",
+        verdict=verdict_str,
+        reasoning=f"Architecture score {score}/10 with {len(details.findings)} finding(s).",
+        confidence=score / 10.0,
+        details=details,
+    )
+    return {"critic_outputs": [output]}
+
+
+# ------------------------------------------------------------------
+# Node: slop_signals_critic (B2)
+# ------------------------------------------------------------------
+
+_SLOP_CRITIC_SYSTEM = """\
+You are a slop detector evaluating whether this PR shows signs of low-effort, AI-generated, or cargo-cult contributions.
+
+You are given the diff, PR description, and a pre-computed heuristic feature vector.
+Assess:
+1. Does the diff solve a real problem in a focused way, or does it add bloat disproportionate to scope?
+2. Are generic AI-typical phrases present in the description without specific technical content?
+3. Does the PR reinvent existing functionality rather than reusing it?
+4. Do the heuristic features (see below) indicate quality issues?
+
+Return ONLY valid JSON (no markdown fences, no prose):
+{
+  "score": <integer 0-10>,
+  "findings": [
+    {
+      "severity": "critical" | "major" | "minor" | "info",
+      "category": "<string>",
+      "evidence": "<exact quote from diff or PR description>"
+    }
+  ],
+  "citations": []
+}
+score 10 = high quality, no slop signals; 0 = clear slop (AI-generated boilerplate, zero substance).
+"""
+
+# Phrases frequently found in AI-generated PR descriptions.
+_AI_PHRASES = [
+    "this pr ", "this pull request ", "i have implemented", "i have added",
+    "feel free to ", "let me know if ", "hope this helps", "happy to make",
+    "easy to understand", "improve code quality", "improve readability",
+    "enhance performance", "various improvements", "minor improvements",
+    "several improvements", "best practices", "clean code", "as per your request",
+]
+
+
+def _compute_sloppiness_features(state: TriageState) -> SloppinessFeatures:
+    """Extract heuristic slop signals from the raw diff and PR metadata."""
+    diff = state.raw_diff or ""
+    body = (state.metadata.body or "").lower()
+    added_lines = [ln[1:] for ln in diff.splitlines() if ln.startswith("+") and not ln.startswith("+++")]
+
+    duplicate_line_ratio = _duplicate_ratio(added_lines)
+    todo_fixme_count = sum(
+        1 for ln in added_lines
+        if any(kw in ln.lower() for kw in ("todo", "fixme", "hack", "xxx"))
+    )
+    debug_print_count = sum(
+        1 for ln in added_lines
+        if any(kw in ln.lower() for kw in ("print(", "console.log(", "debugger", "pdb.set_trace"))
+    )
+    magic_number_count = _count_magic_numbers(added_lines)
+    generic_phrases = sum(1 for phrase in _AI_PHRASES if phrase in body)
+    long_function_count = _count_long_added_functions(added_lines)
+
+    return SloppinessFeatures(
+        duplicate_line_ratio=duplicate_line_ratio,
+        long_function_count=long_function_count,
+        todo_fixme_count=todo_fixme_count,
+        debug_print_count=debug_print_count,
+        magic_number_count=magic_number_count,
+        missing_docstring_count=generic_phrases,  # repurposed: AI phrase count
+    )
+
+
+def _duplicate_ratio(lines: list[str]) -> float:
+    stripped = [ln.strip() for ln in lines if ln.strip()]
+    if not stripped:
+        return 0.0
+    unique = len(set(stripped))
+    return 1.0 - unique / len(stripped)
+
+
+def _count_magic_numbers(lines: list[str]) -> int:
+    import re
+    count = 0
+    for ln in lines:
+        # Raw numeric literals not assigned to a named constant
+        if re.search(r"(?<![a-zA-Z_\d])\d{2,}(?!\s*[=:,\)])", ln):
+            count += 1
+    return count
+
+
+def _count_long_added_functions(lines: list[str]) -> int:
+    """Count function/method definitions in added lines that span >50 added lines."""
+    import re
+    func_starts: list[int] = []
+    for i, ln in enumerate(lines):
+        if re.match(r"\s*(def |function |async def |\w+\s*\()", ln):
+            func_starts.append(i)
+    # Simple heuristic: if total added lines per function block > 50
+    count = 0
+    for i, start in enumerate(func_starts):
+        end = func_starts[i + 1] if i + 1 < len(func_starts) else len(lines)
+        if end - start > 50:
+            count += 1
+    return count
+
+
+def slop_signals_critic_node(state: TriageState, claude: ClaudeClient, *, model: str | None = None) -> dict:
+    """Slop critic — Haiku in production (heuristics carry most weight), overridable for eval."""
+    from pr_triage.claude_client import MODEL_HAIKU
+
+    features = _compute_sloppiness_features(state)
+
+    feature_summary = (
+        f"Heuristic features:\n"
+        f"  duplicate_line_ratio: {features.duplicate_line_ratio:.2f}\n"
+        f"  long_function_count: {features.long_function_count}\n"
+        f"  todo_fixme_count: {features.todo_fixme_count}\n"
+        f"  debug_print_count: {features.debug_print_count}\n"
+        f"  magic_number_count: {features.magic_number_count}\n"
+        f"  ai_phrase_count (in description): {features.missing_docstring_count}\n"
+    )
+
+    diff_preview = (state.raw_diff or "")[:4000]
+    user_msg = (
+        f"PR #{state.metadata.number}: {state.metadata.title}\n\n"
+        f"PR Description:\n{state.metadata.body or '(none)'}\n\n"
+        f"{feature_summary}\n"
+        f"Diff (first 4000 chars):\n{diff_preview}"
+    )
+
+    raw = claude.complete(
+        messages=[{"role": "user", "content": user_msg}],
+        model=model or MODEL_HAIKU,
+        max_tokens=1024,
+        system=_SLOP_CRITIC_SYSTEM,
+    )
+
+    details = _parse_critic_json(raw)
+    score = details.score
+    verdict_str = "pass" if score >= 8 else "needs_review" if score >= 5 else "fail"
+
+    output = CriticOutput(
+        critic_name="slop_signals_critic",
+        verdict=verdict_str,
+        reasoning=f"Slop score {score}/10 with {len(details.findings)} finding(s).",
+        confidence=score / 10.0,
+        details=details,
     )
     return {
-        "aggregate_verdict": Verdict(
-            decision=decision,
-            summary=summary,
-            confidence=guidelines.confidence,
-        )
+        "sloppiness_features": features,
+        "critic_outputs": [output],
     }
+
+
+# ------------------------------------------------------------------
+# Node: aggregate (replaces emit_verdict for Phase 3+)
+# ------------------------------------------------------------------
+
+def aggregate_node(state: TriageState) -> dict:
+    """Deterministic multi-critic aggregator node.
+
+    Combines all critic outputs via the aggregator module.
+    Writes both aggregate_result (Phase 3) and the backward-compatible
+    aggregate_verdict (Phase 2 field).
+    """
+    from pr_triage.aggregator import aggregate
+
+    result = aggregate(state.critic_outputs)
+
+    verdict = Verdict(
+        decision=result.decision,
+        summary=result.summary,
+        confidence=result.confidence,
+    )
+    return {
+        "aggregate_verdict": verdict,
+        "aggregate_result": result,
+    }
+
+
+# Keep emit_verdict_node as an alias for backward compatibility with Phase 2 tests.
+emit_verdict_node = aggregate_node
