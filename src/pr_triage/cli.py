@@ -211,6 +211,37 @@ def golden_build(
 
 
 @app.command()
+def label(
+    pre_labels: Path = typer.Option(Path("data/pre_labels.jsonl"), "--pre-labels"),
+    candidates_dir: Path = typer.Option(Path("data/candidates"), "--candidates-dir"),
+    out: Path = typer.Option(Path("data/golden_labels.jsonl"), "--out"),
+) -> None:
+    """Launch the Streamlit manual labeling tool."""
+    import subprocess
+    import sys
+
+    if not pre_labels.exists():
+        typer.echo(f"Error: {pre_labels} not found. Run `pr-triage prelabel` first.", err=True)
+        raise typer.Exit(1)
+
+    app_path = Path(__file__).parent / "labeler_app.py"
+    env = os.environ.copy()
+    env["LABELER_PRE_LABELS"] = str(pre_labels)
+    env["LABELER_CANDIDATES_DIR"] = str(candidates_dir)
+    env["LABELER_OUT"] = str(out)
+
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "streamlit", "run", str(app_path)],
+            env=env,
+            check=True,
+        )
+    except FileNotFoundError:
+        typer.echo("Error: streamlit not found. Install with: pip install -e '.[eval]'", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
 def index(
     ctx: typer.Context,
     repo: str = typer.Argument(..., help="GitHub repo in owner/repo format"),
