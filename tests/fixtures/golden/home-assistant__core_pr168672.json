@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-15T17:17:57.073568+00:00"
+  },
+  "repo": "home-assistant/core",
+  "pr_number": 168672,
+  "title": "Preserve Fahrenheit precision in google_assistant temperature range",
+  "body": "<!-- PR title (keep under 70 chars): -->\r\n<!--   Preserve Fahrenheit precision in google_assistant temperature range -->\r\n\r\n## Proposed change\r\n\r\nGoogle Home displays the setpoint range for a climate or water_heater entity\r\nthat advertises its range in Fahrenheit as shifted by up to 1 F. For example,\r\nan AC that Home Assistant reports as 62 F to 86 F is displayed by Google Home\r\nas 63 F to 86 F.\r\n\r\nThe cause is in `TemperatureSettingTrait.sync_attributes`\r\n(and the symmetric `water_heater` branch of\r\n`TemperatureControlTrait.sync_attributes`): the F-unit bounds are converted\r\nto Celsius and then rounded to a whole degree before being handed to Google.\r\n\r\n```python\r\nmin_temp = round(\r\n    TemperatureConverter.convert(\r\n        float(attrs[climate.ATTR_MIN_TEMP]), unit, UnitOfTemperature.CELSIUS,\r\n    )\r\n)\r\n```\r\n\r\n62 F is 16.666... C. `round(16.666...)` is 17. Google then converts 17 C\r\nback to Fahrenheit for display, getting 62.6 F, which the Home app rounds to\r\n63 F. Conversely 86 F is exactly 30 C, which is why the upper bound happens\r\nto round-trip cleanly and the reported shift is always at the min in the\r\nreported case (and similarly asymmetric at other F boundaries: 80 F becomes\r\n81 F, 45 F stays 45 F by luck, etc.).\r\n\r\nThis PR carries one decimal place of Celsius precision instead. That matches\r\nhow every other temperature in the same trait is already reported\r\n(`thermostatTemperatureAmbient`, `thermostatTemperatureSetpoint`,\r\n`thermostatTemperatureSetpointHigh`/`Low`), and makes the range round-trip\r\nthrough Google without shifting: 16.7 C is 62.06 F, displayed as 62 F.\r\n\r\nExisting tests assumed the rounded-to-int behavior and are updated to the\r\nnow-reported one-decimal values. A dedicated regression test is added for the\r\n62 to 86 F case.\r\n\r\nThe rounding was introduced in #94143 (June 2023, HA 2023.7), which also\r\nexplains why nobody reported a regression against the much older baseline,\r\nthe field simply was not sent to Google before that PR, so Google fell back\r\nto a default range.\r\n\r\n## Type of change\r\n\r\n- [ ] Dependency upgrade\r\n- [x] Bugfix (non-breaking change which fixes an issue)\r\n- [ ] New integration (thank you!)\r\n- [ ] New feature (which adds functionality to an existing integration)\r\n- [ ] Deprecation (breaking change to happen in the future)\r\n- [ ] Breaking change (fix/feature causing existing functionality to break)\r\n- [ ] Code quality improvements to existing code or addition of tests\r\n\r\n## Additional information\r\n\r\n- This PR fixes a bug (no linked issue; verified no open report matches)\r\n- This PR does not introduce a new integration\r\n- This PR is not related to feature #\r\n\r\n## Checklist\r\n\r\n- [x] The code change is tested and works locally.\r\n- [x] Local tests pass. **Your PR cannot be merged unless tests pass**\r\n- [x] There is no commented out code in this PR.\r\n- [x] I have followed the [development checklist][dev-checklist]\r\n- [x] I have followed the [perfect PR recommendations][perfect-pr]\r\n- [x] The code has been formatted using Ruff (`ruff format homeassistant tests`)\r\n- [x] Tests have been added to verify that the new code works.\r\n\r\nIf user exposed functionality or configuration variables are added/changed:\r\n\r\n- N/A (internal conversion only, no user-visible API change)\r\n\r\nIf the code communicates with devices, web services, or third-party tools:\r\n\r\n- N/A\r\n\r\n[dev-checklist]: https://developers.home-assistant.io/docs/en/development_checklist.html\r\n[perfect-pr]: https://developers.home-assistant.io/docs/en/development_submitting.html#perfect-pull-requests\r\n",
+  "author": "aarontc",
+  "author_association": "CONTRIBUTOR",
+  "created_at": "2026-04-21T06:25:20Z",
+  "updated_at": "2026-05-15T01:44:30Z",
+  "closed_at": "2026-04-21T13:22:22Z",
+  "merged_at": "2026-04-21T13:22:22Z",
+  "base_branch": "dev",
+  "head_branch": "fix-ga-climate-temp-range-rounding",
+  "additions": 47,
+  "deletions": 6,
+  "changed_files": 2,
+  "files_changed": [
+    "homeassistant/components/google_assistant/trait.py",
+    "tests/components/google_assistant/test_trait.py"
+  ],
+  "labels": [
+    "core",
+    "cla-signed",
+    "integration: google_assistant",
+    "small-pr",
+    "has-tests",
+    "bugfix",
+    "Quality Scale: No score"
+  ],
+  "draft": false,
+  "merged": true,
+  "author_prior_prs_in_repo": 0,
+  "linked_issues": [
+    {
+      "number": 94143,
+      "repo": null,
+      "title": "Sync Climate min/max temp with Google Assistant"
+    }
+  ],
+  "issue_comments": [],
+  "bot_comments": [
+    {
+      "user": "home-assistant[bot]",
+      "author_association": "CONTRIBUTOR",
+      "body": "\nHey there @home-assistant/cloud, mind taking a look at this pull request as it has been labeled with an integration (`google_assistant`) you are listed as a [code owner](https://github.com/home-assistant/core/blob/dev/CODEOWNERS#L649) for? Thanks!\n\n<details>\n<summary>Code owner commands</summary>\n\n\nCode owners of `google_assistant` can trigger bot actions by commenting:\n\n- `@home-assistant close` Closes the pull request.\n- `@home-assistant mark-draft` Mark the pull request as draft.\n- `@home-assistant ready-for-review` Remove the draft status from the pull request.\n- `@home-assistant rename Awesome new title` Renames the pull request.\n- `@home-assistant reopen` Reopen the pull request.\n- `@home-assistant unassign google_assistant` Removes the current integration label and assignees on the pull request, add the integration domain after the command.\n- `@home-assistant update-branch` Update the pull request branch with the base branch.\n- `@home-assistant add-label needs-more-information` Add a label (needs-more-information, problem in dependency, problem in custom component, problem in config, problem in device, feature-request) to the pull request.\n- `@home-assistant remove-label needs-more-information` Remove a label (needs-more-information, problem in dependency, problem in custom component, problem in config, problem in device, feature-request) on the pull request.\n\n</details>\n\n",
+      "created_at": "2026-04-21T06:25:28+00:00"
+    }
+  ],
+  "review_comments": [
+    {
+      "user": "Copilot",
+      "author_association": "CONTRIBUTOR",
+      "body": "Add a regression test for the water_heater TemperatureControlTrait that asserts non-integer Fahrenheit min/max temperatures are reported with decimal Celsius precision (so this behavior can\u2019t regress back to whole-degree rounding).",
+      "created_at": "2026-04-21T06:28:09+00:00",
+      "path": "homeassistant/components/google_assistant/trait.py"
+    }
+  ],
+  "raw_diff": "diff --git a/homeassistant/components/google_assistant/trait.py b/homeassistant/components/google_assistant/trait.py\nindex 5ae72b7a41ae7a..6c80a69bf4c600 100644\n--- a/homeassistant/components/google_assistant/trait.py\n+++ b/homeassistant/components/google_assistant/trait.py\n@@ -1076,14 +1076,16 @@ def sync_attributes(self) -> dict[str, Any]:\n                     float(attrs[water_heater.ATTR_MIN_TEMP]),\n                     unit,\n                     UnitOfTemperature.CELSIUS,\n-                )\n+                ),\n+                1,\n             )\n             max_temp = round(\n                 TemperatureConverter.convert(\n                     float(attrs[water_heater.ATTR_MAX_TEMP]),\n                     unit,\n                     UnitOfTemperature.CELSIUS,\n-                )\n+                ),\n+                1,\n             )\n             response[\"temperatureRange\"] = {\n                 \"minThresholdCelsius\": min_temp,\n@@ -1236,14 +1238,16 @@ def sync_attributes(self) -> dict[str, Any]:\n                 float(attrs[climate.ATTR_MIN_TEMP]),\n                 unit,\n                 UnitOfTemperature.CELSIUS,\n-            )\n+            ),\n+            1,\n         )\n         max_temp = round(\n             TemperatureConverter.convert(\n                 float(attrs[climate.ATTR_MAX_TEMP]),\n                 unit,\n                 UnitOfTemperature.CELSIUS,\n-            )\n+            ),\n+            1,\n         )\n         response[\"thermostatTemperatureRange\"] = {\n             \"minThresholdCelsius\": min_temp,\ndiff --git a/tests/components/google_assistant/test_trait.py b/tests/components/google_assistant/test_trait.py\nindex ee2ab12788946d..53b03a596e133e 100644\n--- a/tests/components/google_assistant/test_trait.py\n+++ b/tests/components/google_assistant/test_trait.py\n@@ -1325,7 +1325,7 @@ async def test_temperature_setting_climate_onoff(hass: HomeAssistant) -> None:\n     assert trt.sync_attributes() == {\n         \"availableThermostatModes\": [\"off\", \"cool\", \"heat\", \"heatcool\", \"on\"],\n         \"thermostatTemperatureRange\": {\n-            \"minThresholdCelsius\": 7,\n+            \"minThresholdCelsius\": 7.2,\n             \"maxThresholdCelsius\": 35,\n         },\n         \"thermostatTemperatureUnit\": \"F\",\n@@ -1373,6 +1373,43 @@ async def test_temperature_setting_climate_no_modes(hass: HomeAssistant) -> None\n     }\n \n \n+async def test_temperature_setting_climate_range_fahrenheit_precision(\n+    hass: HomeAssistant,\n+) -> None:\n+    \"\"\"Test that Fahrenheit range bounds are reported to Google with decimal precision.\n+\n+    Regression test: when a climate entity advertises an integer Fahrenheit min/max\n+    whose Celsius equivalent is non-integer (e.g. 62\u00b0F = 16.666\u2026\u00b0C), rounding the\n+    converted value to a whole degree Celsius causes Google Home to display a range\n+    shifted by up to 1\u00b0F when it converts back for display. Reporting one decimal\n+    place of Celsius precision keeps Google's displayed range aligned with\n+    Home Assistant's.\n+    \"\"\"\n+    hass.config.units = US_CUSTOMARY_SYSTEM\n+\n+    trt = trait.TemperatureSettingTrait(\n+        hass,\n+        State(\n+            \"climate.bla\",\n+            climate.HVACMode.COOL,\n+            {\n+                ATTR_SUPPORTED_FEATURES: ClimateEntityFeature.TARGET_TEMPERATURE,\n+                climate.ATTR_HVAC_MODES: [climate.HVACMode.OFF, climate.HVACMode.COOL],\n+                climate.ATTR_MIN_TEMP: 62,\n+                climate.ATTR_MAX_TEMP: 86,\n+            },\n+        ),\n+        BASIC_CONFIG,\n+    )\n+    attrs = trt.sync_attributes()\n+    assert attrs[\"thermostatTemperatureRange\"] == {\n+        \"minThresholdCelsius\": 16.7,\n+        \"maxThresholdCelsius\": 30,\n+    }\n+    # 16.7\u00b0C \u2192 62.06\u00b0F (displays as 62\u00b0F, matching Home Assistant's min of 62\u00b0F);\n+    # the pre-fix value of 17\u00b0C \u2192 62.6\u00b0F would have displayed as 63\u00b0F.\n+\n+\n async def test_temperature_setting_climate_range(hass: HomeAssistant) -> None:\n     \"\"\"Test TemperatureSetting trait support for climate domain - range.\"\"\"\n     assert helpers.get_google_type(climate.DOMAIN, None) is not None\n@@ -1409,7 +1446,7 @@ async def test_temperature_setting_climate_range(hass: HomeAssistant) -> None:\n         \"availableThermostatModes\": [\"off\", \"cool\", \"heat\", \"auto\", \"on\"],\n         \"thermostatTemperatureRange\": {\n             \"minThresholdCelsius\": 10,\n-            \"maxThresholdCelsius\": 27,\n+            \"maxThresholdCelsius\": 26.7,\n         },\n         \"thermostatTemperatureUnit\": \"F\",\n     }\n",
+  "golden_label": "accepted",
+  "label_notes": "First-time HA contributor (aarontc, prior=0) fixing Fahrenheit float precision loss in google_assistant temperature range reporting. Specific technical bug fix merged after code review."
+}

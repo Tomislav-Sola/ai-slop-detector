@@ -51,7 +51,7 @@ def _make_full_label_set(labels_path: Path, cand_dir: Path) -> None:
 
 def test_missing_labels_file_raises(tmp_path):
     with pytest.raises(GoldenBuildError, match="Labels file not found"):
-        build_golden_set(tmp_path / "missing.jsonl", tmp_path / "cands", tmp_path / "out")
+        build_golden_set(tmp_path / "missing.jsonl", [tmp_path / "cands"], tmp_path / "out")
 
 
 def test_invalid_label_value_raises(tmp_path):
@@ -59,14 +59,14 @@ def test_invalid_label_value_raises(tmp_path):
     cand_dir = tmp_path / "cands"
     _write_labels(labels_path, [{"repo": "o/r", "pr_number": 1, "label": "maybe"}])
     with pytest.raises(GoldenBuildError, match="Invalid label"):
-        build_golden_set(labels_path, cand_dir, tmp_path / "out")
+        build_golden_set(labels_path, [cand_dir], tmp_path / "out")
 
 
 def test_missing_label_field_raises(tmp_path):
     labels_path = tmp_path / "labels.jsonl"
     _write_labels(labels_path, [{"repo": "o/r", "pr_number": 1}])
     with pytest.raises(GoldenBuildError, match="Missing 'label'"):
-        build_golden_set(labels_path, tmp_path / "cands", tmp_path / "out")
+        build_golden_set(labels_path, [tmp_path / "cands"], tmp_path / "out")
 
 
 def test_too_few_total_raises(tmp_path):
@@ -78,7 +78,7 @@ def test_too_few_total_raises(tmp_path):
     for e in entries:
         _write_candidate(cand_dir, "o/r", e["pr_number"])
     with pytest.raises(GoldenBuildError, match="at least 30"):
-        build_golden_set(labels_path, cand_dir, tmp_path / "out")
+        build_golden_set(labels_path, [cand_dir], tmp_path / "out")
 
 
 def test_too_few_per_class_raises(tmp_path):
@@ -94,7 +94,7 @@ def test_too_few_per_class_raises(tmp_path):
     for e in entries:
         _write_candidate(cand_dir, "o/r", e["pr_number"])
     with pytest.raises(GoldenBuildError, match="'slop'"):
-        build_golden_set(labels_path, cand_dir, tmp_path / "out")
+        build_golden_set(labels_path, [cand_dir], tmp_path / "out")
 
 
 def test_missing_candidate_file_raises(tmp_path):
@@ -103,14 +103,14 @@ def test_missing_candidate_file_raises(tmp_path):
     cand_dir.mkdir()
     _write_labels(labels_path, [{"repo": "o/r", "pr_number": 99, "label": "accepted"}])
     with pytest.raises(GoldenBuildError, match="Candidate file not found"):
-        build_golden_set(labels_path, cand_dir, tmp_path / "out", force=True)
+        build_golden_set(labels_path, [cand_dir], tmp_path / "out", force=True)
 
 
 def test_invalid_json_in_labels_raises(tmp_path):
     labels_path = tmp_path / "labels.jsonl"
     labels_path.write_text("not json\n")
     with pytest.raises(GoldenBuildError, match="Invalid JSON"):
-        build_golden_set(labels_path, tmp_path / "cands", tmp_path / "out")
+        build_golden_set(labels_path, [tmp_path / "cands"], tmp_path / "out")
 
 
 # ------------------------------------------------------------------
@@ -124,13 +124,14 @@ def test_build_golden_writes_files(tmp_path):
     out_dir = tmp_path / "out"
 
     _make_full_label_set(labels_path, cand_dir)
-    summary = build_golden_set(labels_path, cand_dir, out_dir)
+    summary = build_golden_set(labels_path, [cand_dir], out_dir)
 
     assert summary["total"] == 30
     assert summary["accepted"] == 10
     assert summary["rejected_quality"] == 15
     assert summary["slop"] == 5
-    assert len(list(out_dir.glob("*.json"))) == 30
+    non_manifest = [f for f in out_dir.glob("*.json") if f.name != "manifest.json"]
+    assert len(non_manifest) == 30
 
 
 def test_build_golden_merges_candidate_data(tmp_path):
@@ -140,7 +141,7 @@ def test_build_golden_merges_candidate_data(tmp_path):
     out_dir = tmp_path / "out"
 
     _make_full_label_set(labels_path, cand_dir)
-    build_golden_set(labels_path, cand_dir, out_dir)
+    build_golden_set(labels_path, [cand_dir], out_dir)
 
     sample = json.loads((out_dir / "o__r_pr1.json").read_text())
     assert sample["golden_label"] == "accepted"
@@ -162,7 +163,7 @@ def test_build_golden_stores_notes(tmp_path):
     entries_raw[0] = json.dumps(first)
     labels_path.write_text("\n".join(entries_raw) + "\n")
 
-    build_golden_set(labels_path, cand_dir, out_dir)
+    build_golden_set(labels_path, [cand_dir], out_dir)
     sample = json.loads((out_dir / "o__r_pr1.json").read_text())
     assert sample["label_notes"] == "obvious trivial change"
 
@@ -178,7 +179,7 @@ def test_build_golden_force_bypasses_validation(tmp_path):
     for e in entries:
         _write_candidate(cand_dir, "o/r", e["pr_number"])
 
-    summary = build_golden_set(labels_path, cand_dir, out_dir, force=True)
+    summary = build_golden_set(labels_path, [cand_dir], out_dir, force=True)
     assert summary["total"] == 3
 
 
@@ -193,7 +194,7 @@ def test_build_golden_skips_blank_lines(tmp_path):
     labels_path.write_text(
         '\n{"repo": "o/r", "pr_number": 1, "label": "accepted"}\n\n'
     )
-    summary = build_golden_set(labels_path, cand_dir, out_dir, force=True)
+    summary = build_golden_set(labels_path, [cand_dir], out_dir, force=True)
     assert summary["total"] == 1
 
 
@@ -209,7 +210,7 @@ def test_build_golden_silently_drops_skip_entries(tmp_path):
         '{"repo": "o/r", "pr_number": 1, "label": "accepted"}\n'
         '{"repo": "o/r", "pr_number": 2, "label": "skip"}\n'
     )
-    summary = build_golden_set(labels_path, cand_dir, out_dir, force=True)
+    summary = build_golden_set(labels_path, [cand_dir], out_dir, force=True)
     assert summary["total"] == 1
     assert not (out_dir / "o__r_pr2.json").exists()
 
@@ -226,4 +227,49 @@ def test_build_golden_skip_does_not_count_toward_class_balance(tmp_path):
     entries += [{"repo": "o/r", "pr_number": i, "label": "skip"} for i in range(2, 50)]
     labels_path.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
     with pytest.raises(GoldenBuildError, match="at least 30"):
-        build_golden_set(labels_path, cand_dir, out_dir)
+        build_golden_set(labels_path, [cand_dir], out_dir)
+
+
+def test_build_golden_multi_dir_search(tmp_path):
+    """Candidate found in the second dir should still be written."""
+    labels_path = tmp_path / "labels.jsonl"
+    dir1 = tmp_path / "cands1"
+    dir2 = tmp_path / "cands2"
+    dir1.mkdir()
+    dir2.mkdir()
+    out_dir = tmp_path / "out"
+
+    _write_candidate(dir2, "o/r", 1)
+    labels_path.write_text('{"repo": "o/r", "pr_number": 1, "label": "accepted"}\n')
+    summary = build_golden_set(labels_path, [dir1, dir2], out_dir, force=True)
+    assert summary["total"] == 1
+    assert (out_dir / "o__r_pr1.json").exists()
+
+
+def test_build_golden_missing_in_all_dirs_raises(tmp_path):
+    labels_path = tmp_path / "labels.jsonl"
+    dir1 = tmp_path / "cands1"
+    dir1.mkdir()
+    labels_path.write_text('{"repo": "o/r", "pr_number": 99, "label": "accepted"}\n')
+    with pytest.raises(GoldenBuildError, match="Candidate file not found"):
+        build_golden_set(labels_path, [dir1], out_dir=tmp_path / "out", force=True)
+
+
+def test_build_golden_writes_manifest(tmp_path):
+    labels_path = tmp_path / "labels.jsonl"
+    cand_dir = tmp_path / "cands"
+    cand_dir.mkdir()
+    out_dir = tmp_path / "out"
+
+    _make_full_label_set(labels_path, cand_dir)
+    build_golden_set(labels_path, [cand_dir], out_dir)
+
+    manifest_path = out_dir / "manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["total"] == 30
+    assert manifest["class_counts"]["accepted"] == 10
+    assert manifest["class_counts"]["rejected_quality"] == 15
+    assert manifest["class_counts"]["slop"] == 5
+    assert "repo_counts" in manifest
+    assert "built_at" in manifest

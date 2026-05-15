@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 _MIN_TOTAL = 30
@@ -13,9 +15,28 @@ class GoldenBuildError(Exception):
     pass
 
 
+def _find_candidate(
+    repo: str,
+    pr_number: int,
+    candidates_dirs: list[Path],
+) -> Path:
+    """Return the first matching candidate file found across all dirs."""
+    safe = repo.replace("/", "__")
+    fname = f"{safe}_pr{pr_number}.json"
+    for d in candidates_dirs:
+        p = d / fname
+        if p.exists():
+            return p
+    searched = ", ".join(str(d) for d in candidates_dirs)
+    raise GoldenBuildError(
+        f"Candidate file not found for {repo}#{pr_number} "
+        f"(searched: {searched})"
+    )
+
+
 def build_golden_set(
     labels_path: Path,
-    candidates_dir: Path,
+    candidates_dirs: list[Path],
     out_dir: Path,
     *,
     min_total: int = _MIN_TOTAL,
@@ -28,8 +49,9 @@ def build_golden_set(
       { "repo": "owner/repo", "pr_number": 7, "label": "accepted" }
 
     Entries with label "skip" are silently ignored (not written, not counted).
-    Matching candidate files are read from candidates_dir.
+    Candidate files are searched across all candidates_dirs in order.
     Per-entry golden JSON files are written to out_dir.
+    A manifest.json is written to out_dir with class and repo counts.
 
     Returns a summary dict: { "total": N, "accepted": N, "rejected_quality": N, "slop": N }
 
@@ -38,7 +60,7 @@ def build_golden_set(
     - any label is not in VALID_LABELS (and not "skip")
     - total < min_total (unless force=True)
     - any class has < min_per_class entries (unless force=True)
-    - a referenced candidate file is missing
+    - a referenced candidate file is missing in all candidates_dirs
     """
     if not labels_path.exists():
         raise GoldenBuildError(f"Labels file not found: {labels_path}")
@@ -56,7 +78,7 @@ def build_golden_set(
             if "label" not in entry:
                 raise GoldenBuildError(f"Missing 'label' field on line {lineno}: {entry}")
             if entry["label"] == _SKIP_LABEL:
-                continue  # silently exclude skipped entries
+                continue
             if entry["label"] not in _VALID_LABELS:
                 raise GoldenBuildError(
                     f"Invalid label '{entry['label']}' on line {lineno} "
@@ -82,6 +104,7 @@ def build_golden_set(
                 )
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    repo_counts: Counter = Counter()
     written = 0
 
     for label_entry in labels:
@@ -92,13 +115,7 @@ def build_golden_set(
                 f"Label entry missing 'repo' or 'pr_number': {label_entry}"
             )
 
-        safe = repo.replace("/", "__")
-        candidate_file = candidates_dir / f"{safe}_pr{pr_number}.json"
-        if not candidate_file.exists():
-            raise GoldenBuildError(
-                f"Candidate file not found: {candidate_file}"
-            )
-
+        candidate_file = _find_candidate(repo, pr_number, candidates_dirs)
         candidate = json.loads(candidate_file.read_text())
         golden_entry = {
             **candidate,
@@ -106,8 +123,19 @@ def build_golden_set(
             "label_notes": label_entry.get("notes", ""),
         }
 
+        safe = repo.replace("/", "__")
         out_file = out_dir / f"{safe}_pr{pr_number}.json"
         out_file.write_text(json.dumps(golden_entry, indent=2))
+        repo_counts[repo] += 1
         written += 1
+
+    manifest = {
+        "total": written,
+        "class_counts": class_counts,
+        "repo_counts": dict(repo_counts.most_common()),
+        "candidates_dirs": [str(d) for d in candidates_dirs],
+        "built_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     return {"total": written, **class_counts}

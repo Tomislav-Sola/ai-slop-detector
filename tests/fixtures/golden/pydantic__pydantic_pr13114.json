@@ -1,0 +1,65 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:20:49.082317+00:00"
+  },
+  "repo": "pydantic/pydantic",
+  "pr_number": 13114,
+  "title": "fix(v1): filter _build_values kwargs; utf-8 secret file reads",
+  "body": "## Summary\n\n- `BaseSettings.__init__` passes only keyword arguments supported by the resolved `_build_values` implementation (via `inspect.signature`), so subclasses that override `_build_values` with older signatures (without `_env_nested_delimiter` / `_secrets_dir`) no longer hit `TypeError` from unexpected keywords.\n- Secret files are read with explicit UTF-8 encoding for stable behavior across platforms.\n\n## Context\n\nFollow-up to compatibility and encoding notes from review of settings secret-file behavior (historical #1279 / #1820); same themes apply to the v1 compatibility layer in `pydantic.v1`.\n\n## Verification\n\n- `uv run pytest tests/test_deprecated.py -q` (48 passed)\n- Manual `pydantic.v1.BaseSettings` subclass with legacy `_build_values(self, init_kwargs, _env_file=None, _env_file_encoding=None)` calling `super()._build_values(...)`\n",
+  "author": "dallascrilley",
+  "created_at": "2026-04-23T17:29:47Z",
+  "updated_at": "2026-04-24T08:57:43Z",
+  "closed_at": "2026-04-24T07:13:30Z",
+  "merged_at": null,
+  "base_branch": "main",
+  "head_branch": "fix/v1-settings-build-values-compat",
+  "additions": 39,
+  "deletions": 10,
+  "changed_files": 2,
+  "files_changed": [
+    "pydantic/v1/env_settings.py",
+    "tests/test_v1.py"
+  ],
+  "labels": [],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 0,
+  "linked_issues": [
+    {
+      "number": 1279,
+      "repo": null,
+      "title": "Read values from secrets files when using BaseSettings"
+    },
+    {
+      "number": 1820,
+      "repo": null,
+      "title": "Add ability to read secrets from files"
+    }
+  ],
+  "issue_comments": [
+    {
+      "user": "Viicos",
+      "author_association": "MEMBER",
+      "body": "[V1 does not receive fixes](https://pydantic.dev/docs/validation/latest/get-started/version-policy/#pydantic-v1).",
+      "created_at": "2026-04-24T07:13:30+00:00"
+    }
+  ],
+  "bot_comments": [
+    {
+      "user": "github-actions[bot]",
+      "author_association": "CONTRIBUTOR",
+      "body": "## Coverage report\n\n\n<img title=\"Coverage for the whole project is 95.95%. Previous coverage rate is not available, cannot report on evolution.\" src=\"https://img.shields.io/badge/Coverage-95%25-orange.svg\"> <img title=\"100% of the statement lines added by this PR are covered\" src=\"https://img.shields.io/badge/PR%20Coverage-100%25-brightgreen.svg\">\n\n_This PR does not seem to contain any modification to coverable code._\n\n<!-- This comment was produced by python-coverage-comment-action -->",
+      "created_at": "2026-04-23T17:45:45+00:00"
+    },
+    {
+      "user": "codspeed-hq[bot]",
+      "author_association": "NONE",
+      "body": "<!-- __CODSPEED_PERFORMANCE_REPORT_COMMENT__ -->\n## Merging this PR will **improve performance by 10.97%**\n\n\n\n<details>\n<summary>:warning: <b>Different runtime environments detected</b></summary>\n\n> Some benchmarks with significant performance changes were compared across different runtime environments,\n> which may affect the accuracy of the results.\n>\n> [Open the report in CodSpeed to investigate](https://codspeed.io/pydantic/pydantic/branches/dallascrilley%3Afix%2Fv1-settings-build-values-compat?utm_source=github&utm_medium=comment-v2&utm_content=comparison_issues)\n\n</details>\n\n`\u26a1 2` improved benchmarks  \n`\u2705 213` untouched benchmarks  \n\n\n\n### Performance Changes\n\n|     | Benchmark | `BASE` | `HEAD` | Efficiency |\n| --- | --------- | ------ | ------ | ---------- |\n| \u26a1 | [`` test_simple_recursive_model_schema_generation ``](https://codspeed.io/pydantic/pydantic/branches/dallascrilley%3Afix%2Fv1-settings-build-values-compat?uri=tests%2Fbenchmarks%2Ftest_model_schema_generation_recursive.py%3A%3Atest_simple_recursive_model_schema_generation&runnerMode=Simulation&utm_source=github&utm_medium=comment-v2&utm_content=benchmark) | 814.1 \u00b5s | 733.6 \u00b5s | +10.97% |\n| \u26a1 | [`` test_validators_build ``](https://codspeed.io/pydantic/pydantic/branches/dallascrilley%3Afix%2Fv1-settings-build-values-compat?uri=tests%2Fbenchmarks%2Ftest_validators_build.py%3A%3Atest_validators_build&runnerMode=Simulation&utm_source=github&utm_medium=comment-v2&utm_content=benchmark) | 1,039.9 \u00b5s | 987.5 \u00b5s | +5.3% |\n---\n\n<sub>Comparing <code>dallascrilley:fix/v1-settings-build-values-compat</code> (583306a) with <code>main</code> (fcb5da3)</sub>\n\n<a href=\"https://codspeed.io/pydantic/pydantic/branches/dallascrilley%3Afix%2Fv1-settings-build-values-compat?utm_source=github&utm_medium=comment-v2&utm_content=button\">\n  <picture>\n    <source media=\"(prefers-color-scheme: dark)\" srcset=\"https://codspeed.io/pr-report/open-in-codspeed-dark.svg\">\n    <source media=\"(prefers-color-scheme: light)\" srcset=\"https://codspeed.io/pr-report/open-in-codspeed-light.svg\">\n    <img alt=\"Open in CodSpeed\" src=\"https://codspeed.io/pr-report/open-in-codspeed-light.svg\" width=\"169\" height=\"32\">\n  </picture>\n</a>\n\n",
+      "created_at": "2026-04-23T17:49:20+00:00"
+    }
+  ],
+  "review_comments": [],
+  "raw_diff": "diff --git a/pydantic/v1/env_settings.py b/pydantic/v1/env_settings.py\nindex 5f6f217500d..c92dea9c6fb 100644\n--- a/pydantic/v1/env_settings.py\n+++ b/pydantic/v1/env_settings.py\n@@ -1,3 +1,4 @@\n+import inspect\n import os\n import warnings\n from pathlib import Path\n@@ -37,15 +38,15 @@ def __init__(\n         **values: Any,\n     ) -> None:\n         # Uses something other than `self` the first arg to allow \"self\" as a settable attribute\n-        super().__init__(\n-            **__pydantic_self__._build_values(\n-                values,\n-                _env_file=_env_file,\n-                _env_file_encoding=_env_file_encoding,\n-                _env_nested_delimiter=_env_nested_delimiter,\n-                _secrets_dir=_secrets_dir,\n-            )\n-        )\n+        _build_kw = {\n+            '_env_file': _env_file,\n+            '_env_file_encoding': _env_file_encoding,\n+            '_env_nested_delimiter': _env_nested_delimiter,\n+            '_secrets_dir': _secrets_dir,\n+        }\n+        _sig = inspect.signature(__pydantic_self__._build_values)\n+        _build_kw = {k: v for k, v in _build_kw.items() if k in _sig.parameters}\n+        super().__init__(**__pydantic_self__._build_values(values, **_build_kw))\n \n     def _build_values(\n         self,\n@@ -304,7 +305,7 @@ def __call__(self, settings: BaseSettings) -> Dict[str, Any]:\n                     continue\n \n                 if path.is_file():\n-                    secret_value = path.read_text().strip()\n+                    secret_value = path.read_text(encoding='utf-8').strip()\n                     if field.is_complex():\n                         try:\n                             secret_value = settings.__config__.parse_env_var(field.name, secret_value)\ndiff --git a/tests/test_v1.py b/tests/test_v1.py\nindex bca6d4b72cd..fe966520782 100644\n--- a/tests/test_v1.py\n+++ b/tests/test_v1.py\n@@ -7,6 +7,7 @@\n from pydantic import BaseModel as V2BaseModel\n from pydantic.v1 import VERSION as V1_VERSION\n from pydantic.v1 import BaseModel as V1BaseModel\n+from pydantic.v1 import BaseSettings as V1BaseSettings\n from pydantic.v1 import root_validator as v1_root_validator\n \n \n@@ -48,3 +49,30 @@ class V2Model(V2BaseModel):\n         assert not isinstance(v1_obj, V2BaseModel)\n         assert not isinstance(v2_obj, V1BaseModel)\n         assert isinstance(v2_obj, V2BaseModel)\n+\n+\n+def test_v1_base_settings_legacy_build_values_signature(tmp_path):\n+    \"\"\"Subclasses that override `_build_values` without newer kwargs must not break `__init__`.\"\"\"\n+\n+    class Settings(V1BaseSettings):\n+        foo: str = 'default'\n+\n+        class Config:\n+            secrets_dir = tmp_path\n+\n+        def _build_values(self, init_kwargs, _env_file=None, _env_file_encoding=None):\n+            return super()._build_values(init_kwargs, _env_file=_env_file, _env_file_encoding=_env_file_encoding)\n+\n+    (tmp_path / 'foo').write_text('from-secret', encoding='utf-8')\n+    assert Settings().foo == 'from-secret'\n+\n+\n+def test_v1_secrets_file_utf8(tmp_path):\n+    class Settings(V1BaseSettings):\n+        token: str\n+\n+        class Config:\n+            secrets_dir = tmp_path\n+\n+    (tmp_path / 'token').write_text('\\u03bb', encoding='utf-8')\n+    assert Settings().token == '\\u03bb'\n",
+  "golden_label": "rejected_quality",
+  "label_notes": "Pydantic v1 policy-rejection sub-pattern, first of its kind in corpus. dallascrilley (first-time-contributor, prior_prs=0, NONE) submitted technically clean +39/-10 fix for v1 BaseSettings compatibility (subclass signature filtering via inspect.signature + UTF-8 secret file encoding). Viicos (MEMBER) closed 14h later with single comment citing official policy: 'V1 does not receive fixes' linking pydantic.dev version policy. Notable: code quality is genuinely good \u2014 CodSpeed shows +10.97% performance improvement on test_simple_recursive_model_schema_generation, 100% coverage on new statements, sensible tests including UTF-8 lambda character (\u03bb), clean focused diff, no AI-typical patterns (no over-documentation, no Claude footer, no manipulative pings). Body cites real historical issues #1279 and #1820 with appropriate 'historical' framing. Different from other pydantic rejected_quality cases (silent-close architectural issues): here the entire v1 subsystem is frozen \u2014 fix would have been declined regardless of quality. Calibration value: critic must distinguish policy-rejection from quality-rejection \u2014 even technically excellent code can be rejected on subsystem-policy grounds (frozen branches, deprecated APIs, sunset features). Defends against false positive where good code gets misclassified as slop due to first-time-author + silent-style-rejection signals."
+}

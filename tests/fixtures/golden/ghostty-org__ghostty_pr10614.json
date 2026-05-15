@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:08:56.141043+00:00"
+  },
+  "repo": "ghostty-org/ghostty",
+  "pr_number": 10614,
+  "title": "fix(gtk): restore middle-click paste when scrollbar is enabled",
+  "body": "## Summary\n\n- Fixes middle-click paste (primary selection) not working when GTK scrollbars are enabled\n- The `GtkScrolledWindow` was intercepting middle-click events before they reached the terminal Surface\n\n## Solution\n\n- Added a `GestureClick` with `propagation-phase: capture` to the ScrolledWindow that intercepts middle-clicks and forwards them to the Surface\n- The gesture is claimed after handling to prevent double-paste when the scrollbar is not visible\n- Also disabled `kinetic-scrolling` on the ScrolledWindow as it uses middle-click for autoscroll\n\n## Test plan\n\n- [x] Enable scrollbars (`scrollbar = system` in config)\n- [x] Select text in another application to populate primary selection\n- [x] Middle-click in Ghostty terminal - should paste once\n- [x] Run `seq 1 80` to make scrollbar visible\n- [x] Middle-click again - should still paste once\n\nFixes #10613\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.ai/code)",
+  "author": "hakonhagland",
+  "created_at": "2026-02-08T03:32:06Z",
+  "updated_at": "2026-05-05T10:57:09Z",
+  "closed_at": "2026-02-08T03:39:26Z",
+  "merged_at": null,
+  "base_branch": "main",
+  "head_branch": "fix-scrollbar-middle-click-paste",
+  "additions": 38,
+  "deletions": 0,
+  "changed_files": 3,
+  "files_changed": [
+    "src/apprt/gtk/class/surface.zig",
+    "src/apprt/gtk/class/surface_scrolled_window.zig",
+    "src/apprt/gtk/ui/1.5/surface-scrolled-window.blp"
+  ],
+  "labels": [],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 0,
+  "linked_issues": [
+    {
+      "number": 10613,
+      "repo": null,
+      "title": "Ubuntu 25.10: Middle-click paste does not work when the GTK scrollbar feature is enabled"
+    }
+  ],
+  "issue_comments": [
+    {
+      "user": "jcollie",
+      "author_association": "MEMBER",
+      "body": "Closing because procedures not followed.",
+      "created_at": "2026-02-08T03:39:26+00:00"
+    },
+    {
+      "user": "hakonhagland",
+      "author_association": "NONE",
+      "body": " For reference: we found the root cause of this issue.                                                                                                       \r\n                                                                                                                                                              \r\n The bug only occurs when the GNOME setting `org.gnome.desktop.interface overlay-scrolling` is set to `false` (traditional scrollbars). With the default `true`  (overlay scrollbars), middle-click works correctly.                                                                                                         \r\n                                                                                                                                                              \r\n When overlay scrolling is disabled, GTK's `ScrolledWindow` handles middle-click events differently, intercepting them before they reach child widgets.        \r\n                                                                                                                                                              \r\n  This fix would still be useful for users who prefer traditional scrollbars, but it's a more limited use case than originally thought.                       \r\n                                                                                                                                                              \r\n  See discussion: https://github.com/ghostty-org/ghostty/discussions/10616",
+      "created_at": "2026-02-08T07:12:44+00:00"
+    }
+  ],
+  "bot_comments": [],
+  "review_comments": [],
+  "raw_diff": "diff --git a/src/apprt/gtk/class/surface.zig b/src/apprt/gtk/class/surface.zig\nindex 26009ef79ed..a2ff52aa9fb 100644\n--- a/src/apprt/gtk/class/surface.zig\n+++ b/src/apprt/gtk/class/surface.zig\n@@ -2713,6 +2713,18 @@ pub const Surface = extern struct {\n         };\n     }\n \n+    /// Public method to forward mouse down events from parent widgets\n+    /// (e.g., ScrolledWindow capturing middle-clicks).\n+    pub fn forwardMouseDown(\n+        self: *Self,\n+        gesture: *gtk.GestureClick,\n+        n_press: c_int,\n+        x: f64,\n+        y: f64,\n+    ) void {\n+        gcMouseDown(gesture, n_press, x, y, self);\n+    }\n+\n     fn gcMouseDown(\n         gesture: *gtk.GestureClick,\n         _: c_int,\ndiff --git a/src/apprt/gtk/class/surface_scrolled_window.zig b/src/apprt/gtk/class/surface_scrolled_window.zig\nindex 488fdb3f4e6..a1d849f7453 100644\n--- a/src/apprt/gtk/class/surface_scrolled_window.zig\n+++ b/src/apprt/gtk/class/surface_scrolled_window.zig\n@@ -138,6 +138,24 @@ pub const SurfaceScrolledWindow = extern struct {\n         };\n     }\n \n+    /// Handle middle-click at the ScrolledWindow level to prevent the\n+    /// ScrolledWindow from intercepting it. This forwards the event to\n+    /// the Surface's mouse handler.\n+    fn scrolledWindowMouseDown(\n+        gesture: *gtk.GestureClick,\n+        n_press: c_int,\n+        x: f64,\n+        y: f64,\n+        self: *Self,\n+    ) callconv(.c) void {\n+        const surface = self.private().surface orelse return;\n+        surface.forwardMouseDown(gesture, n_press, x, y);\n+\n+        // Claim the gesture to prevent the Surface's GestureClick from\n+        // also handling this event (which would cause double-paste).\n+        _ = gesture.as(gtk.Gesture).setState(.claimed);\n+    }\n+\n     fn propSurface(\n         self: *Self,\n         _: *gobject.ParamSpec,\n@@ -189,6 +207,7 @@ pub const SurfaceScrolledWindow = extern struct {\n             // Bindings\n             class.bindTemplateCallback(\"scrollbar_policy\", &closureScrollbarPolicy);\n             class.bindTemplateCallback(\"notify_surface\", &propSurface);\n+            class.bindTemplateCallback(\"scrolled_window_mouse_down\", &scrolledWindowMouseDown);\n \n             // Properties\n             gobject.ext.registerProperties(class, &.{\ndiff --git a/src/apprt/gtk/ui/1.5/surface-scrolled-window.blp b/src/apprt/gtk/ui/1.5/surface-scrolled-window.blp\nindex 722c4427b3f..9855fdd0b12 100644\n--- a/src/apprt/gtk/ui/1.5/surface-scrolled-window.blp\n+++ b/src/apprt/gtk/ui/1.5/surface-scrolled-window.blp\n@@ -7,5 +7,12 @@ template $GhostttySurfaceScrolledWindow: Adw.Bin {\n   Gtk.ScrolledWindow {\n     hscrollbar-policy: never;\n     vscrollbar-policy: bind $scrollbar_policy(template.config) as <Gtk.PolicyType>;\n+    kinetic-scrolling: false;\n+\n+    GestureClick {\n+      pressed => $scrolled_window_mouse_down();\n+      button: 2;\n+      propagation-phase: capture;\n+    }\n   }\n }\n",
+  "golden_label": "slop",
+  "label_notes": "procedure violation with potentially valid technical content \u2014 calibration case for non-code-quality slop"
+}

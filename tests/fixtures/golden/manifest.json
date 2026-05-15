@@ -1,0 +1,23 @@
+{
+  "total": 53,
+  "class_counts": {
+    "accepted": 20,
+    "rejected_quality": 20,
+    "slop": 13
+  },
+  "repo_counts": {
+    "pydantic/pydantic": 13,
+    "astral-sh/ruff": 9,
+    "python-poetry/poetry": 7,
+    "godotengine/godot": 6,
+    "home-assistant/core": 6,
+    "ghostty-org/ghostty": 5,
+    "curl/curl": 5,
+    "tldraw/tldraw": 2
+  },
+  "candidates_dirs": [
+    "data/candidates",
+    "data/golden_candidates_v2"
+  ],
+  "built_at": "2026-05-15T19:13:42.020429+00:00"
+}

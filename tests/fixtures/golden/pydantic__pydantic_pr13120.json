@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:20:23.782039+00:00"
+  },
+  "repo": "pydantic/pydantic",
+  "pr_number": 13120,
+  "title": "docs(validators): document model_validator execution order with inheritance",
+  "body": "## Why\n\nIssue #10790 (and the related thread in #8277) shows that the order in which `@model_validator` runs across an inheritance chain is non-obvious \u2014 especially that a subclass `mode='after'` validator runs *outside* a base class `mode='wrap'`, not inside it. The current \"On inheritance\" admonition only says inherited validators are called, not in what order.\n\n## What\n\nExtends the existing \"On inheritance\" admonition under `## Model validators` in `docs/concepts/validators.md` with:\n\n- A short rule per mode (`before`, `after`, `wrap`) describing the parent/child execution order.\n- An explicit note about the `wrap` + subclass `after` interaction (the surprising case in #10790).\n- A minimal runnable example with a base class and a subclass each defining `before` and `after` validators, with the expected output as a docstring block.\n\nThe example is marked `{test=\"skip\"}` to avoid coupling the doc test runner to print-ordering details, matching the pattern used by other examples in this file.\n\n## Tested\n\nVerified the documented order against the empirical output in #10790 (reproducer by the original reporter, confirmed independently by other commenters in the thread) and against the validator collection logic in `pydantic/_internal/_decorators.py` (`reversed(mro(typ)[1:-1])` plus the typ's own decorators last).\n\nCloses #10790\n",
+  "author": "MukundaKatta",
+  "created_at": "2026-04-26T20:49:25Z",
+  "updated_at": "2026-04-28T07:09:55Z",
+  "closed_at": "2026-04-28T07:09:55Z",
+  "merged_at": null,
+  "base_branch": "main",
+  "head_branch": "docs/validator-inheritance-order",
+  "additions": 47,
+  "deletions": 0,
+  "changed_files": 1,
+  "files_changed": [
+    "docs/concepts/validators.md"
+  ],
+  "labels": [],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 0,
+  "linked_issues": [
+    {
+      "number": 10790,
+      "repo": null,
+      "title": "Execution order of model validators with model inheritance"
+    },
+    {
+      "number": 8277,
+      "repo": null,
+      "title": "Validators execution order"
+    }
+  ],
+  "issue_comments": [],
+  "bot_comments": [
+    {
+      "user": "codspeed-hq[bot]",
+      "author_association": "NONE",
+      "body": "<!-- __CODSPEED_PERFORMANCE_REPORT_COMMENT__ -->\n## Merging this PR will **degrade performance by 23.42%**\n\n\n\n\n`\u274c 1` regressed benchmark  \n`\u2705 214` untouched benchmarks  \n\n\n> :warning: _Please fix the performance issues or [acknowledge them on CodSpeed](https://codspeed.io/pydantic/pydantic/branches/MukundaKatta%3Adocs%2Fvalidator-inheritance-order?utm_source=github&utm_medium=comment-v2&utm_content=acknowledge)._\n\n### Performance Changes\n\n|     | Benchmark | `BASE` | `HEAD` | Efficiency |\n| --- | --------- | ------ | ------ | ---------- |\n| \u274c | [`` test_simple_recursive_model_schema_generation ``](https://codspeed.io/pydantic/pydantic/branches/MukundaKatta%3Adocs%2Fvalidator-inheritance-order?uri=tests%2Fbenchmarks%2Ftest_model_schema_generation_recursive.py%3A%3Atest_simple_recursive_model_schema_generation&runnerMode=Simulation&utm_source=github&utm_medium=comment-v2&utm_content=benchmark) | 624.6 \u00b5s | 815.6 \u00b5s | -23.42% |\n---\n\n<sub>Comparing <code>MukundaKatta:docs/validator-inheritance-order</code> (74db9c1) with <code>main</code> (3c305a3)</sub>\n\n<a href=\"https://codspeed.io/pydantic/pydantic/branches/MukundaKatta%3Adocs%2Fvalidator-inheritance-order?utm_source=github&utm_medium=comment-v2&utm_content=button\">\n  <picture>\n    <source media=\"(prefers-color-scheme: dark)\" srcset=\"https://codspeed.io/pr-report/open-in-codspeed-dark.svg\">\n    <source media=\"(prefers-color-scheme: light)\" srcset=\"https://codspeed.io/pr-report/open-in-codspeed-light.svg\">\n    <img alt=\"Open in CodSpeed\" src=\"https://codspeed.io/pr-report/open-in-codspeed-light.svg\" width=\"169\" height=\"32\">\n  </picture>\n</a>\n\n",
+      "created_at": "2026-04-26T20:59:38+00:00"
+    },
+    {
+      "user": "github-actions[bot]",
+      "author_association": "CONTRIBUTOR",
+      "body": "## Coverage report\n\n\n<img title=\"Coverage for the whole project is 95.95%. Previous coverage rate is not available, cannot report on evolution.\" src=\"https://img.shields.io/badge/Coverage-95%25-orange.svg\"> <img title=\"100% of the statement lines added by this PR are covered\" src=\"https://img.shields.io/badge/PR%20Coverage-100%25-brightgreen.svg\">\n\n_This PR does not seem to contain any modification to coverable code._\n\n<!-- This comment was produced by python-coverage-comment-action -->",
+      "created_at": "2026-04-26T21:05:02+00:00"
+    }
+  ],
+  "review_comments": [],
+  "raw_diff": "diff --git a/docs/concepts/validators.md b/docs/concepts/validators.md\nindex d19738e3e22..91846cdc6fb 100644\n--- a/docs/concepts/validators.md\n+++ b/docs/concepts/validators.md\n@@ -551,6 +551,53 @@ decorator.\n \n     Overriding a model validator in a subclass will override the base class' validator, and thus only the subclass' version of said validator will be called.\n \n+    **Execution order with inheritance.** When the same mode is defined on both a base class and a subclass (under different names, so neither overrides the other), validators run in the following order:\n+\n+    * `mode='before'`: the **subclass** validator runs first, then the **base class** validator. The data flows from subclass to base before reaching pydantic-core.\n+    * `mode='after'`: the **base class** validator runs first, then the **subclass** validator. The instance flows from base to subclass after pydantic-core has built it.\n+    * `mode='wrap'`: the **subclass** wrapper is the outermost layer, and the **base class** wrapper sits inside it (so the subclass' wrapper begins first and ends last).\n+\n+    Note that subclass `mode='after'` validators run *outside* a base class `mode='wrap'` validator, not inside it. If you need an `after` validator to be wrapped by an inherited `wrap` validator, define the `wrap` validator on the subclass instead.\n+\n+    ```python {test=\"skip\"}\n+    from pydantic import BaseModel, model_validator\n+\n+\n+    class Base(BaseModel):\n+        @model_validator(mode='before')\n+        @classmethod\n+        def base_before(cls, data):\n+            print('base before')\n+            return data\n+\n+        @model_validator(mode='after')\n+        def base_after(self):\n+            print('base after')\n+            return self\n+\n+\n+    class Sub(Base):\n+        @model_validator(mode='before')\n+        @classmethod\n+        def sub_before(cls, data):\n+            print('sub before')\n+            return data\n+\n+        @model_validator(mode='after')\n+        def sub_after(self):\n+            print('sub after')\n+            return self\n+\n+\n+    Sub()\n+    \"\"\"\n+    sub before\n+    base before\n+    base after\n+    sub after\n+    \"\"\"\n+    ```\n+\n ## Raising validation errors\n \n To raise a validation error, three types of exceptions can be used:\n",
+  "golden_label": "rejected_quality",
+  "label_notes": "Doc-only PR (+47/-0, no code changes) documenting model_validator inheritance ordering. First-time author (prior_prs=0), closed unmerged after 1.5 days with zero maintainer engagement. Technically substantial \u2014 references actual pydantic source code (_decorators.py) and empirical issue thread verification. Borderline case: not clearly slop (no obvious AI markers beyond template-clean structure, no resubmit pattern), but also not clearly accepted by maintainers. Likely closed because Pydantic doesn't accept doc PRs from first-time contributors without prior issue discussion, or because the documentation contains subtle inaccuracies. CodSpeed -23% regression on schema-generation benchmark is noise (unrelated to doc-only change)."
+}

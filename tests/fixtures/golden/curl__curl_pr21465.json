@@ -1,0 +1,140 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:13:58.793868+00:00"
+  },
+  "repo": "curl/curl",
+  "pr_number": 21465,
+  "title": "mqtt: validate PINGRESP and DISCONNECT have remaining_length == 0",
+  "body": "Per HackerOne report #3702718. Daniel asked me to send this as a PR.\n\nMQTT 3.1.1 sections 3.13.1 and 3.14.1 require PINGRESP and\nDISCONNECT to have remaining_length == 0. lib/mqtt.c did not\nvalidate this before dispatching to mqtt->nextstate, which\nallowed a malicious broker to send a PINGRESP with non-zero\nremaining_length whose trailing bytes would be interpreted\nas the payload of whatever state was queued.\n\nThe exploitation path turned out to be narrow (curl sends\ndata to the server the user chose to talk to), but the spec\nviolation and the resulting protocol-state error are real.\nThis patch rejects the malformed packets with\nCURLE_WEIRD_SERVER_REPLY before state dispatch.\n\nReproducer is in the HackerOne report.\n\nFound-by: VORTIQ-X VXF Framework",
+  "author": "GovClawAPI",
+  "created_at": "2026-04-29T09:46:01Z",
+  "updated_at": "2026-04-30T12:15:40Z",
+  "closed_at": "2026-04-30T12:15:34Z",
+  "merged_at": null,
+  "base_branch": "master",
+  "head_branch": "vxf-audit",
+  "additions": 183,
+  "deletions": 9,
+  "changed_files": 5,
+  "files_changed": [
+    "lib/mqtt.c",
+    "tests/data/Makefile.am",
+    "tests/data/test2206",
+    "tests/data/test2207",
+    "tests/server/mqttd.c"
+  ],
+  "labels": [
+    "tests",
+    "MQTT"
+  ],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 0,
+  "linked_issues": [
+    {
+      "number": 3702718,
+      "repo": null,
+      "title": null
+    }
+  ],
+  "issue_comments": [
+    {
+      "user": "bagder",
+      "author_association": "MEMBER",
+      "body": "Did you look into making a test case that verifies?",
+      "created_at": "2026-04-29T09:56:42+00:00"
+    },
+    {
+      "user": "GovClawAPI",
+      "author_association": "NONE",
+      "body": "Done. Removed the credit from the inline comment, and added a regression test (tests/data/test2206) that verifies curl rejects malformed PINGRESP/DISCONNECT with CURLE_WEIRD_SERVER_REPLY. Test passes locally.",
+      "created_at": "2026-04-29T10:28:04+00:00"
+    },
+    {
+      "user": "GovClawAPI",
+      "author_association": "NONE",
+      "body": "> Did you look into making a test case that verifies?\r\n\r\ncheck all out now, Our team is scanning more platforms to help closing any bugs or CVE, It was a pleasure collaborating with you.",
+      "created_at": "2026-04-29T10:57:03+00:00"
+    },
+    {
+      "user": "GovClawAPI",
+      "author_association": "NONE",
+      "body": "Addressed all five review comments \u2014 thanks @Copilot for the careful read.\n\n1. Magic 0xD0 replaced with MQTT_MSG_PINGRESP in mqttd.c.\n2. logprotocol() now uses `rc` instead of `sizeof(packet)` so partial writes do not log uninitialized bytes.\n3. Header check now masks the type nibble (`& 0xF0`) and rejects non-zero reserved bits per MQTT 3.1.1 s. 2.2.2. Catches 0xD1, 0xE2, etc. Good catch \u2014 would have bypassed the original check.\n4. failf() message now includes both the offending remaining_length and the raw header byte.\n5. Added test2207 for malformed DISCONNECT alongside the existing PINGRESP test (test2206). Extended mqttd with `DISCONNECT-malformed` config knob.\n\nForce-pushed. CI re-running.",
+      "created_at": "2026-04-29T20:59:34+00:00"
+    },
+    {
+      "user": "GovClawAPI",
+      "author_association": "NONE",
+      "body": "Good catch \u2014 that was a local debug leftover from PoC verification. Removed.",
+      "created_at": "2026-04-29T21:12:12+00:00"
+    },
+    {
+      "user": "bagder",
+      "author_association": "MEMBER",
+      "body": "Thanks!",
+      "created_at": "2026-04-30T12:15:40+00:00"
+    }
+  ],
+  "bot_comments": [],
+  "review_comments": [
+    {
+      "user": "bagder",
+      "author_association": "MEMBER",
+      "body": "We don't give credit in comments, we do that in the commit message only.\n\n```suggestion\n    /* PINGRESP and DISCONNECT must have\n```",
+      "created_at": "2026-04-29T09:55:08+00:00",
+      "path": "lib/mqtt.c"
+    },
+    {
+      "user": "bagder",
+      "author_association": "MEMBER",
+      "body": "Local debug leftover?",
+      "created_at": "2026-04-29T11:49:21+00:00",
+      "path": ".gitignore"
+    },
+    {
+      "user": "Copilot",
+      "author_association": "NONE",
+      "body": "`packet[0] = 0xD0` introduces a new magic number even though this file already defines MQTT control packet constants at the top. Defining `MQTT_MSG_PINGRESP` here (and using it) would keep the test server consistent and reduce the chance of typos if this logic expands.",
+      "created_at": "2026-04-29T11:54:37+00:00",
+      "path": "tests/server/mqttd.c"
+    },
+    {
+      "user": "Copilot",
+      "author_association": "NONE",
+      "body": "`logprotocol()` is called with `len = sizeof(packet)` even when `swrite()` returns a short write. That can log bytes that were never actually sent. Passing `rc` (the number of bytes written) would make the protocol dump accurate in partial-write scenarios.\n```suggestion\n                packet, rc);\n```",
+      "created_at": "2026-04-29T11:54:37+00:00",
+      "path": "tests/server/mqttd.c"
+    },
+    {
+      "user": "Copilot",
+      "author_association": "NONE",
+      "body": "The remaining-length check only matches exact fixed-header bytes (0xD0/0xE0). A malformed PINGRESP/DISCONNECT with non-zero reserved flags (e.g. 0xD1) would bypass this guard, still dispatch to `mqtt->nextstate`, and reintroduce the same state-confusion issue. Consider matching on the packet type nibble (`mq->firstbyte & 0xF0`) and/or explicitly rejecting non-zero reserved flags for these control packet types before dispatch.",
+      "created_at": "2026-04-29T11:54:37+00:00",
+      "path": "lib/mqtt.c"
+    },
+    {
+      "user": "Copilot",
+      "author_association": "NONE",
+      "body": "The new `failf()` message would be more actionable if it included the offending Remaining Length value (and possibly the raw fixed header byte). That makes it easier to diagnose broker-side issues and confirm the exact malformed packet being rejected.\n```suggestion\n      failf(data,\n            \"Broker sent %s with nonzero remaining length (%u), \"\n            \"fixed header byte 0x%02x\",\n            mq->firstbyte == MQTT_MSG_DISCONNECT ? \"DISCONNECT\" :\n            \"PINGRESP\",\n            mq->remaining_length, mq->firstbyte);\n```",
+      "created_at": "2026-04-29T11:54:38+00:00",
+      "path": "lib/mqtt.c"
+    },
+    {
+      "user": "Copilot",
+      "author_association": "NONE",
+      "body": "This change also adds enforcement for malformed DISCONNECT packets, but the added test only covers PINGRESP. It would be good to add a regression test case that sends DISCONNECT with `remaining_length > 0` and asserts `CURLE_WEIRD_SERVER_REPLY`, so this half of the fix can\u2019t regress unnoticed.",
+      "created_at": "2026-04-29T11:54:38+00:00",
+      "path": "lib/mqtt.c"
+    },
+    {
+      "user": "bagder",
+      "author_association": "MEMBER",
+      "body": "For the `size_t` variable:\n\n```suggestion\n              \"(remaining_length=%zu, header byte=0x%02x)\",\n```",
+      "created_at": "2026-04-30T11:06:16+00:00",
+      "path": "lib/mqtt.c"
+    }
+  ],
+  "raw_diff": "diff --git a/lib/mqtt.c b/lib/mqtt.c\nindex 84fd272e21e7..d28a25bb50dd 100644\n--- a/lib/mqtt.c\n+++ b/lib/mqtt.c\n@@ -892,6 +892,24 @@ static CURLcode mqtt_doing(struct Curl_easy *data, bool *done)\n       break;\n     }\n     mq->npacket = 0;\n+    /* PINGRESP and DISCONNECT must have remaining_length == 0 and\n+     * reserved bits (low nibble) must be zero per MQTT 3.1.1\n+     * sections 2.2.2, 3.13.1 and 3.14.1. Reject before state\n+     * dispatch to prevent nextstate confusion. */\n+    {\n+      const unsigned char type = mq->firstbyte & 0xF0;\n+      const unsigned char reserved = mq->firstbyte & 0x0F;\n+      if((type == MQTT_MSG_DISCONNECT || type == MQTT_MSG_PINGRESP) &&\n+         (mq->remaining_length || reserved)) {\n+        failf(data,\n+              \"Broker sent malformed %s \"\n+              \"(remaining_length=%zu, header byte=0x%02x)\",\n+              type == MQTT_MSG_DISCONNECT ? \"DISCONNECT\" : \"PINGRESP\",\n+              mq->remaining_length, mq->firstbyte);\n+        result = CURLE_WEIRD_SERVER_REPLY;\n+        break;\n+      }\n+    }\n     if(mq->remaining_length) {\n       mqstate(data, mqtt->nextstate, MQTT_NOSTATE);\n       break;\ndiff --git a/tests/data/Makefile.am b/tests/data/Makefile.am\nindex 5a517df9f3c9..706a4c89ed91 100644\n--- a/tests/data/Makefile.am\n+++ b/tests/data/Makefile.am\n@@ -261,7 +261,7 @@ test2080 test2081 test2082 test2083 test2084 test2085 test2086 test2087 \\\n test2088 test2089 test2090 test2091 \\\n test2100 test2101 test2102 test2103 test2104 \\\n \\\n-test2200 test2201 test2202 test2203 test2204 test2205 \\\n+test2200 test2201 test2202 test2203 test2204 test2205 test2206 test2207 \\\n \\\n test2300 test2301 test2302 test2303 test2304 test2306 test2307 test2308 \\\n test2309 \\\ndiff --git a/tests/data/test2206 b/tests/data/test2206\nnew file mode 100644\nindex 000000000000..31530221f88b\n--- /dev/null\n+++ b/tests/data/test2206\n@@ -0,0 +1,59 @@\n+<?xml version=\"1.0\" encoding=\"US-ASCII\"?>\n+<testcase>\n+<info>\n+<keywords>\n+MQTT\n+MQTT SUBSCRIBE\n+</keywords>\n+</info>\n+\n+# Server-side\n+<reply>\n+<data nocheck=\"yes\">\n+hello\n+</data>\n+\n+# Send a PINGRESP (0xD0) with remaining_length=2 in place of the\n+# expected CONNACK. MQTT 3.1.1 s. 3.13.1 requires PINGRESP to have\n+# remaining_length == 0. Curl must reject this with\n+# CURLE_WEIRD_SERVER_REPLY rather than dispatching to the CONNACK\n+# handler.\n+<servercmd>\n+PINGRESP-as-CONNACK TRUE\n+</servercmd>\n+</reply>\n+\n+# Client-side\n+<client>\n+<features>\n+mqtt\n+</features>\n+<server>\n+mqtt\n+</server>\n+<name>\n+MQTT reject PINGRESP with nonzero remaining_length in place of CONNACK\n+</name>\n+<command option=\"binary-trace\">\n+mqtt://%HOSTIP:%MQTTPORT/%TESTNUMBER\n+</command>\n+</client>\n+\n+# Verify data after the test has been \"shot\"\n+<verify>\n+# Strip out the random part of the client id from the CONNECT message\n+# before comparison\n+<strippart>\n+s/^(.* 00044d5154540402003c000c6375726c).*/$1/\n+</strippart>\n+<protocol>\n+client CONNECT 18 00044d5154540402003c000c6375726c\n+server PINGRESP-as-CONNACK 2 d0020000\n+</protocol>\n+\n+# 8 is CURLE_WEIRD_SERVER_REPLY\n+<errorcode>\n+8\n+</errorcode>\n+</verify>\n+</testcase>\ndiff --git a/tests/data/test2207 b/tests/data/test2207\nnew file mode 100644\nindex 000000000000..2aa3bd2636cb\n--- /dev/null\n+++ b/tests/data/test2207\n@@ -0,0 +1,59 @@\n+<?xml version=\"1.0\" encoding=\"US-ASCII\"?>\n+<testcase>\n+<info>\n+<keywords>\n+MQTT\n+MQTT SUBSCRIBE\n+</keywords>\n+</info>\n+\n+# Server-side\n+<reply>\n+<data nocheck=\"yes\">\n+hello\n+</data>\n+\n+# Send a DISCONNECT with remaining_length=2 after the PUBLISH.\n+# MQTT 3.1.1 s. 3.14.1 requires DISCONNECT to have remaining_length == 0.\n+# Curl must reject this with CURLE_WEIRD_SERVER_REPLY.\n+<servercmd>\n+DISCONNECT-malformed TRUE\n+</servercmd>\n+</reply>\n+\n+# Client-side\n+<client>\n+<features>\n+mqtt\n+</features>\n+<server>\n+mqtt\n+</server>\n+<name>\n+MQTT reject DISCONNECT with nonzero remaining_length\n+</name>\n+<command option=\"binary-trace\">\n+mqtt://%HOSTIP:%MQTTPORT/%TESTNUMBER\n+</command>\n+</client>\n+\n+# Verify data after the test has been \"shot\"\n+<verify>\n+<strippart>\n+s/^(.* 00044d5154540402003c000c6375726c).*/$1/\n+</strippart>\n+<protocol>\n+client CONNECT 18 00044d5154540402003c000c6375726c\n+server CONNACK 2 20020000\n+client SUBSCRIBE 9 000100043232303700\n+server SUBACK 3 9003000100\n+server PUBLISH c 300c00043232303768656c6c6f0a\n+server DISCONNECT-malformed 2 e0020000\n+</protocol>\n+\n+# 8 is CURLE_WEIRD_SERVER_REPLY\n+<errorcode>\n+8\n+</errorcode>\n+</verify>\n+</testcase>\ndiff --git a/tests/server/mqttd.c b/tests/server/mqttd.c\nindex 0a3a6ee02499..ad4aa3a6409f 100644\n--- a/tests/server/mqttd.c\n+++ b/tests/server/mqttd.c\n@@ -40,6 +40,7 @@\n /* #define MQTT_MSG_PUBACK     0x40 */\n #define MQTT_MSG_SUBSCRIBE  0x82\n #define MQTT_MSG_SUBACK     0x90\n+#define MQTT_MSG_PINGRESP   0xd0\n #define MQTT_MSG_DISCONNECT 0xe0\n \n struct mqttd_configurable {\n@@ -49,6 +50,8 @@ struct mqttd_configurable {\n   bool publish_before_suback;\n   bool short_publish;\n   bool excessive_remaining;\n+  bool pingresp_as_connack; /* send PINGRESP with payload instead of CONNACK */\n+  bool disconnect_malformed; /* DISCONNECT with nonzero remlen */\n   unsigned char error_connack;\n   unsigned char remlen_connack;\n };\n@@ -65,6 +68,8 @@ static void mqttd_resetdefaults(void)\n   m_config.publish_before_suback = FALSE;\n   m_config.short_publish = FALSE;\n   m_config.excessive_remaining = FALSE;\n+  m_config.pingresp_as_connack = FALSE;\n+  m_config.disconnect_malformed = FALSE;\n   m_config.error_connack = 0;\n   m_config.remlen_connack = 0;\n   m_config.testnum = 0;\n@@ -98,6 +103,14 @@ static void mqttd_getconfig(void)\n           logmsg(\"short-PUBLISH set\");\n           m_config.short_publish = TRUE;\n         }\n+        else if(!strcmp(key, \"PINGRESP-as-CONNACK\")) {\n+          logmsg(\"PINGRESP-as-CONNACK set\");\n+          m_config.pingresp_as_connack = TRUE;\n+        }\n+        else if(!strcmp(key, \"DISCONNECT-malformed\")) {\n+          logmsg(\"DISCONNECT-malformed set\");\n+          m_config.disconnect_malformed = TRUE;\n+        }\n         else if(!strcmp(key, \"error-CONNACK\")) {\n           pval = value;\n           if(!curlx_str_number(&pval, &num, 0xff)) {\n@@ -166,6 +179,16 @@ static int connack(FILE *dump, curl_socket_t fd)\n     0x00, 0x00\n   };\n   ssize_t rc;\n+  const char *label = \"CONNACK\";\n+\n+  if(m_config.pingresp_as_connack) {\n+    /* Send a PINGRESP (0xD0) with remaining_length=2 and payload\n+       mimicking a successful CONNACK. MQTT 3.1.1 s. 3.13.1 requires\n+       PINGRESP to have remaining_length=0, so this is malformed. */\n+    packet[0] = MQTT_MSG_PINGRESP;\n+    label = \"PINGRESP-as-CONNACK\";\n+    logmsg(\"Sending malformed PINGRESP in place of CONNACK\");\n+  }\n \n   if(m_config.remlen_connack)\n     packet[1] = m_config.remlen_connack;\n@@ -173,10 +196,10 @@ static int connack(FILE *dump, curl_socket_t fd)\n \n   rc = swrite(fd, packet, sizeof(packet));\n   if(rc > 0) {\n-    logmsg(\"WROTE %zd bytes [CONNACK]\", rc);\n+    logmsg(\"WROTE %zd bytes [%s]\", rc, label);\n     loghex(packet, rc);\n-    logprotocol(FROM_SERVER, \"CONNACK\", packet[1], dump,\n-                packet, sizeof(packet));\n+    logprotocol(FROM_SERVER, label, packet[1], dump,\n+                packet, rc);\n   }\n   if(rc == sizeof(packet)) {\n     return 0;\n@@ -235,15 +258,30 @@ static int disconnect(FILE *dump, curl_socket_t fd)\n {\n   unsigned char packet[] = {\n     MQTT_MSG_DISCONNECT, 0x00,\n+    0x00, 0x00 /* extra bytes for malformed variant */\n   };\n-  ssize_t rc = swrite(fd, packet, sizeof(packet));\n-  if(rc == sizeof(packet)) {\n-    logmsg(\"WROTE %zd bytes [DISCONNECT]\", rc);\n+  size_t pktlen = 2;\n+  const char *label = \"DISCONNECT\";\n+  ssize_t rc;\n+\n+  if(m_config.disconnect_malformed) {\n+    /* Send DISCONNECT with remaining_length=2 (must be 0 per spec) */\n+    packet[1] = 0x02;\n+    pktlen = 4;\n+    label = \"DISCONNECT-malformed\";\n+    logmsg(\"Sending malformed DISCONNECT with nonzero remaining_length\");\n+  }\n+\n+  rc = swrite(fd, packet, pktlen);\n+  if(rc > 0) {\n+    logmsg(\"WROTE %zd bytes [%s]\", rc, label);\n     loghex(packet, rc);\n-    logprotocol(FROM_SERVER, \"DISCONNECT\", 0, dump, packet, rc);\n+    logprotocol(FROM_SERVER, label, packet[1], dump, packet, rc);\n+  }\n+  if(rc == (ssize_t)pktlen) {\n     return 0;\n   }\n-  logmsg(\"Failed sending [DISCONNECT]\");\n+  logmsg(\"Failed sending [%s]\", label);\n   return 1;\n }\n \n",
+  "golden_label": "slop",
+  "label_notes": "AI-assisted security report with fabricated tool name ('VORTIQ-X VXF Framework' \u2014 does not exist), suspicious author profile (GovClawAPI, 0 prior PRs, NONE association), non-human marketing-style comments ('Our team is scanning more platforms', 'pleasure collaborating'), and HackerOne #3702718 referenced without verification. Real underlying bug, but classic curl bug-bounty-farming slop pattern: AI-fabricated 'security framework' surfaces a real-but-narrow MQTT spec violation; submitter formats it as PR; bagder takes the core fix in his own commit and silently closes this PR. Subtle slop variant \u2014 passes technical review surface, fails authenticity check."
+}

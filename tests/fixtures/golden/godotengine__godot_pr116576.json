@@ -1,0 +1,72 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:04:42.496880+00:00"
+  },
+  "repo": "godotengine/godot",
+  "pr_number": 116576,
+  "title": "Fix inner class navigation in Editor",
+  "body": "This PR fixes the issue where an inner class script is attached to a node. Selecting a script from `SceneTree` or `Inspector` opens an empty script file.\r\nRelated use case of an inner class https://github.com/godotengine/godot-proposals/issues/14285\r\n<details>\r\n<summary>Before this PR:</summary>\r\n\r\nhttps://github.com/user-attachments/assets/ae22c837-e289-4cb8-98f1-2b1fa79980b1\r\n</details>\r\n<details>\r\n<summary>After this PR:</summary>\r\n\r\nhttps://github.com/user-attachments/assets/7ac8c68a-6c3b-44b0-be2c-3572ffd240d7\r\n</details>",
+  "author": "DexterFstone",
+  "created_at": "2026-02-21T10:24:58Z",
+  "updated_at": "2026-05-07T18:28:45Z",
+  "closed_at": "2026-02-21T19:06:56Z",
+  "merged_at": null,
+  "base_branch": "master",
+  "head_branch": "Fix-inner-class-navigation-in-Editor",
+  "additions": 70,
+  "deletions": 24,
+  "changed_files": 4,
+  "files_changed": [
+    "editor/editor_data.cpp",
+    "editor/inspector/editor_resource_picker.cpp",
+    "editor/script/script_editor_plugin.cpp",
+    "modules/gdscript/gdscript.h"
+  ],
+  "labels": [
+    "bug",
+    "archived",
+    "topic:gdscript",
+    "topic:editor"
+  ],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 22,
+  "linked_issues": [
+    {
+      "number": 14285,
+      "repo": "godotengine/godot-proposals",
+      "title": null
+    }
+  ],
+  "issue_comments": [
+    {
+      "user": "HolonProduction",
+      "author_association": "MEMBER",
+      "body": "With this PR: Is it possible to actually save the scene, close it, reopen it and still have everything in a valid state?\r\n\r\nBecause if not, I don't see the benefit in suppressing error messages for something that does not work.",
+      "created_at": "2026-02-21T12:49:14+00:00"
+    },
+    {
+      "user": "DexterFstone",
+      "author_association": "CONTRIBUTOR",
+      "body": "> With this PR: Is it possible to actually save the scene, close it, reopen it and still have everything in a valid state?\r\n\r\nWhat do you mean by valid state?",
+      "created_at": "2026-02-21T14:39:43+00:00"
+    },
+    {
+      "user": "HolonProduction",
+      "author_association": "MEMBER",
+      "body": "I mean that inner class scripts can't be correctly serialized into a packed scene:\r\n\r\n[Screencast From 2026-02-21 15-55-14.webm](https://github.com/user-attachments/assets/ac66a6b3-237a-46b9-9431-77e77665ef91)\r\n\r\nBasically the same issue as with inner class resources. So IMO there really is no point in supporting them in the inspector if they will corrupt the scene anyway.\r\n",
+      "created_at": "2026-02-21T14:59:26+00:00"
+    },
+    {
+      "user": "DexterFstone",
+      "author_association": "CONTRIBUTOR",
+      "body": "> I mean that inner class scripts can't be correctly serialized into a packed scene:\r\n> \r\n>  Screencast.From.2026-02-21.15-55-14.webm \r\n> Basically the same issue as with inner class resources. So IMO there really is no point in supporting them in the inspector if they will corrupt the scene anyway.\r\n\r\nI will try to see if it is possible to fix it; if not, I will close this PR",
+      "created_at": "2026-02-21T17:00:24+00:00"
+    }
+  ],
+  "bot_comments": [],
+  "review_comments": [],
+  "raw_diff": "diff --git a/editor/editor_data.cpp b/editor/editor_data.cpp\nindex 5b25ccf49ab4..5f966ca320c5 100644\n--- a/editor/editor_data.cpp\n+++ b/editor/editor_data.cpp\n@@ -1164,33 +1164,35 @@ Ref<Texture2D> EditorData::get_script_icon(const String &p_script_path) {\n \t\t}\n \t}\n \n-\tRef<Script> base_scr = ResourceLoader::load(p_script_path, \"Script\");\n-\twhile (base_scr.is_valid()) {\n-\t\t// Check for scripted classes.\n-\t\tString icon_path;\n-\t\tStringName base_class_name = script_class_get_name(base_scr->get_path());\n-\t\tif (base_scr->is_built_in() || base_class_name == StringName()) {\n-\t\t\ticon_path = base_scr->get_class_icon_path();\n-\t\t} else {\n-\t\t\ticon_path = script_class_get_icon_path(base_class_name);\n-\t\t}\n+\tif (!p_script_path.is_empty()) {\n+\t\tRef<Script> base_scr = ResourceLoader::load(p_script_path, \"Script\");\n+\t\twhile (base_scr.is_valid()) {\n+\t\t\t// Check for scripted classes.\n+\t\t\tString icon_path;\n+\t\t\tStringName base_class_name = script_class_get_name(base_scr->get_path());\n+\t\t\tif (base_scr->is_built_in() || base_class_name == StringName()) {\n+\t\t\t\ticon_path = base_scr->get_class_icon_path();\n+\t\t\t} else {\n+\t\t\t\ticon_path = script_class_get_icon_path(base_class_name);\n+\t\t\t}\n \n-\t\tRef<Texture2D> icon = _load_script_icon(icon_path);\n-\t\tif (icon.is_valid()) {\n-\t\t\t_script_icon_cache[p_script_path] = icon;\n-\t\t\treturn icon;\n-\t\t}\n+\t\t\tRef<Texture2D> icon = _load_script_icon(icon_path);\n+\t\t\tif (icon.is_valid()) {\n+\t\t\t\t_script_icon_cache[p_script_path] = icon;\n+\t\t\t\treturn icon;\n+\t\t\t}\n \n-\t\t// Check for legacy custom classes defined by plugins.\n-\t\t// TODO: Should probably be deprecated in 4.x\n-\t\tconst EditorData::CustomType *ctype = get_custom_type_by_path(base_scr->get_path());\n-\t\tif (ctype && ctype->icon.is_valid()) {\n-\t\t\t_script_icon_cache[p_script_path] = ctype->icon;\n-\t\t\treturn ctype->icon;\n-\t\t}\n+\t\t\t// Check for legacy custom classes defined by plugins.\n+\t\t\t// TODO: Should probably be deprecated in 4.x\n+\t\t\tconst EditorData::CustomType *ctype = get_custom_type_by_path(base_scr->get_path());\n+\t\t\tif (ctype && ctype->icon.is_valid()) {\n+\t\t\t\t_script_icon_cache[p_script_path] = ctype->icon;\n+\t\t\t\treturn ctype->icon;\n+\t\t\t}\n \n-\t\t// Move to the base class.\n-\t\tbase_scr = base_scr->get_base_script();\n+\t\t\t// Move to the base class.\n+\t\t\tbase_scr = base_scr->get_base_script();\n+\t\t}\n \t}\n \n \t// Check if the base type is an extension-defined type.\ndiff --git a/editor/inspector/editor_resource_picker.cpp b/editor/inspector/editor_resource_picker.cpp\nindex df579223362a..133d2e1dd4c5 100644\n--- a/editor/inspector/editor_resource_picker.cpp\n+++ b/editor/inspector/editor_resource_picker.cpp\n@@ -51,6 +51,12 @@\n #include \"scene/resources/gradient_texture.h\"\n #include \"scene/resources/image_texture.h\"\n \n+#include \"modules/modules_enabled.gen.h\" // for gdscript\n+\n+#ifdef MODULE_GDSCRIPT_ENABLED\n+#include \"modules/gdscript/gdscript.h\"\n+#endif\n+\n static bool _has_sub_resources(const Ref<Resource> &p_res) {\n \tList<PropertyInfo> property_list;\n \tp_res->get_property_list(&property_list);\n@@ -182,6 +188,15 @@ void EditorResourcePicker::_update_resource_preview(const String &p_path, const\n \t}\n \n \tif (preview_rect) {\n+\t\t// For inner classes, show the owner's preview instead, as they don't have their own preview.\n+#ifdef MODULE_GDSCRIPT_ENABLED\n+\t\tRef<GDScript> gdscript = edited_resource;\n+\t\tif (gdscript.is_valid() && gdscript->is_built_in() && gdscript->has_owner()) {\n+\t\t\tRef<GDScript> owner_script = gdscript->get_owner();\n+\t\t\tassign_button->set_text(owner_script->get_path().get_file());\n+\t\t\treturn;\n+\t\t}\n+#endif\n \t\tRef<Script> scr = edited_resource;\n \t\tif (scr.is_valid()) {\n \t\t\tassign_button->set_text(scr->get_path().get_file());\n@@ -220,6 +235,16 @@ void EditorResourcePicker::_resource_selected() {\n \t\treturn;\n \t}\n \n+\t// For inner classes, select the owner instead, as they can't be edited directly.\n+#ifdef MODULE_GDSCRIPT_ENABLED\n+\tRef<GDScript> gdscript = edited_resource;\n+\tif (gdscript.is_valid() && gdscript->is_built_in() && gdscript->has_owner()) {\n+\t\tRef<GDScript> owner_script = gdscript->get_owner();\n+\t\temit_signal(SNAME(\"resource_selected\"), owner_script, false);\n+\t\treturn;\n+\t}\n+#endif\n+\n \temit_signal(SNAME(\"resource_selected\"), edited_resource, false);\n }\n \ndiff --git a/editor/script/script_editor_plugin.cpp b/editor/script/script_editor_plugin.cpp\nindex f084092e4605..2e1a404bc054 100644\n--- a/editor/script/script_editor_plugin.cpp\n+++ b/editor/script/script_editor_plugin.cpp\n@@ -78,6 +78,12 @@\n #include \"scene/main/window.h\"\n #include \"servers/display/display_server.h\"\n \n+#include \"modules/modules_enabled.gen.h\" // for gdscript\n+\n+#ifdef MODULE_GDSCRIPT_ENABLED\n+#include \"modules/gdscript/gdscript.h\"\n+#endif\n+\n void ScriptEditorQuickOpen::popup_dialog(const Vector<String> &p_functions, bool p_dontclear) {\n \tpopup_centered_ratio(0.6);\n \tif (p_dontclear) {\n@@ -2162,6 +2168,16 @@ bool ScriptEditor::edit(const Ref<Resource> &p_resource, int p_line, int p_col,\n \t\treturn false;\n \t}\n \n+\t// Ignore inner classes for the purpose of opening in the editor, as they are not separate resources.\n+#ifdef MODULE_GDSCRIPT_ENABLED\n+\tRef<GDScript> gdscript = p_resource;\n+\tif (gdscript.is_valid() && gdscript->is_built_in() && gdscript->has_owner()) {\n+\t\tRef<GDScript> owner_script = gdscript->get_owner();\n+\t\tint inner_line = owner_script->get_member_line(gdscript->get_local_name());\n+\t\treturn edit(owner_script, inner_line - 1, p_col, p_grab_focus);\n+\t}\n+#endif\n+\n \tRef<Script> scr = p_resource;\n \n \t// Don't open dominant script if using an external editor.\ndiff --git a/modules/gdscript/gdscript.h b/modules/gdscript/gdscript.h\nindex 4522d2d3d775..fe996cded04b 100644\n--- a/modules/gdscript/gdscript.h\n+++ b/modules/gdscript/gdscript.h\n@@ -307,6 +307,9 @@ class GDScript : public Script {\n \tString get_script_path() const;\n \tError load_source_code(const String &p_path);\n \n+\tbool has_owner() const { return _owner != nullptr && _owner->is_valid(); }\n+\tGDScript *get_owner() const { return _owner; }\n+\n \tvoid set_binary_tokens_source(const Vector<uint8_t> &p_binary_tokens);\n \tconst Vector<uint8_t> &get_binary_tokens_source() const;\n \tVector<uint8_t> get_as_binary_tokens() const;\n",
+  "golden_label": "rejected_quality",
+  "label_notes": "Symptom-fix rejected as not-root-cause Godot case. DexterFstone (CONTRIBUTOR, 22 prior PRs) substantial fix (+70/-24) for inner-class script navigation showing empty file in editor. HolonProduction (MEMBER) demonstrated with screencast that inner class scripts cannot be correctly serialized into packed scenes \u2014 making the editor-navigation fix actively harmful (would encourage users to attach inner-class scripts that corrupt scenes). External-maintainer-shown deeper bug parallels curl#21226 (CI-failure-driven self-close) and ruff#22067 (sharkdp soundness counterexample). DexterFstone accepted feedback and self-closed 2h later. Different from miguelrsgoncalves#116422 (wrong abstraction layer): here the diagnosis was incomplete \u2014 fix addresses symptom while underlying serialization bug remains. Adds Godot case + 'symptom-fix-not-root-cause' sub-pattern to rejected_quality class."
+}

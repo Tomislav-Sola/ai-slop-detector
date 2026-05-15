@@ -1,0 +1,76 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-15T17:42:10.384938+00:00"
+  },
+  "repo": "ghostty-org/ghostty",
+  "pr_number": 12267,
+  "title": "build: respect config.emit_xcframework for building libghostty-vt.xcframework on Darwin",
+  "body": "This fixes a hardcoded build issue on macOS where Zig unconditionally forces xcodebuild -create-xcframework to run during compilation, even when the caller explicitly specifies that they only want the raw standard C objects/headers (-Demit-lib-vt).\n\n",
+  "author": "0xDVC",
+  "author_association": "CONTRIBUTOR",
+  "created_at": "2026-04-13T14:20:31Z",
+  "updated_at": "2026-04-24T20:48:52Z",
+  "closed_at": "2026-04-24T20:48:52Z",
+  "merged_at": "2026-04-24T20:48:51Z",
+  "base_branch": "main",
+  "head_branch": "fix/xcframework-macos-dependency",
+  "additions": 27,
+  "deletions": 10,
+  "changed_files": 3,
+  "files_changed": [
+    ".github/workflows/test.yml",
+    "build.zig",
+    "src/build/Config.zig"
+  ],
+  "labels": [
+    "libghostty"
+  ],
+  "draft": false,
+  "merged": true,
+  "author_prior_prs_in_repo": 0,
+  "linked_issues": [],
+  "issue_comments": [
+    {
+      "user": "mitchellh",
+      "author_association": "CONTRIBUTOR",
+      "body": "!vouch",
+      "created_at": "2026-04-13T14:22:07+00:00"
+    },
+    {
+      "user": "mitchellh",
+      "author_association": "CONTRIBUTOR",
+      "body": "We've got some CI failures, we should look into it. I thought our swift example should have xcode and we should default emit xcframework to true.",
+      "created_at": "2026-04-14T16:05:11+00:00"
+    },
+    {
+      "user": "jcollie",
+      "author_association": "MEMBER",
+      "body": "@0xDVC Looks like `build.zig` isn't properly formatted. We require that all Zig files are formatted with `zig fmt`.",
+      "created_at": "2026-04-23T02:38:11+00:00"
+    },
+    {
+      "user": "0xDVC",
+      "author_association": "CONTRIBUTOR",
+      "body": "> @0xDVC Looks like `build.zig` isn't properly formatted. We require that all Zig files are formatted with `zig fmt`.\r\n\r\n@jcollie should be okay now. weird that I missed that",
+      "created_at": "2026-04-23T09:01:23+00:00"
+    },
+    {
+      "user": "0xDVC",
+      "author_association": "CONTRIBUTOR",
+      "body": "> Sorry for the back and forth on this, I should probably just pick this up myself. Not happy with where this is at currently.\r\n> \r\n> * We should reuse the `emit-xcframework` and not introduce a new flag (just have it semantically affect lib vt too)\r\n> * We should change the default to whether we can detect xcode tools or not\r\n> * I don't understand why the swift-vt-xcframework Package.swift had to change\r\n\r\n@mitchellh `zig build -Demit-lib-vt` was unconditionally invoking xcodebuild to produce the xcframework, which breaks on machines with only command-line tools and no full xcode. \r\n\r\nThe fix was supposed to gate it behind `emit-xcframework`, which now auto-detects xcodebuild in `PATH` rather than introducing a new flag. \r\n\r\nThe `Package.swift` change was a fix for the interim approach and is reverted since it's no longer needed. \r\n\r\nI'm probably missing something here, but made some new changes. so do have a look",
+      "created_at": "2026-04-23T17:09:51+00:00"
+    }
+  ],
+  "bot_comments": [
+    {
+      "user": "ghostty-vouch[bot]",
+      "author_association": "CONTRIBUTOR",
+      "body": "Hi @0xDVC, thanks for your interest in contributing!\n\nThis project requires that pull request authors are vouched, and you are not in the list of vouched users. \n\nThis PR will be closed automatically. See https://github.com/ghostty-org/ghostty/blob/main/CONTRIBUTING.md for more details.\n",
+      "created_at": "2026-04-13T14:20:54+00:00"
+    }
+  ],
+  "review_comments": [],
+  "raw_diff": "diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml\nindex 3c74fe6aa36..22d7eea7089 100644\n--- a/.github/workflows/test.yml\n+++ b/.github/workflows/test.yml\n@@ -340,6 +340,9 @@ jobs:\n       - name: Build XCFramework\n         run: nix develop -c zig build -Demit-lib-vt\n \n+      - name: Verify XCFramework artifact\n+        run: test -f zig-out/lib/ghostty-vt.xcframework/Info.plist\n+\n       - name: Build and Run Example\n         run: |\n           cd example/${{ matrix.dir }}\ndiff --git a/build.zig b/build.zig\nindex b89958e5546..952b4621df5 100644\n--- a/build.zig\n+++ b/build.zig\n@@ -155,7 +155,11 @@ pub fn build(b: *std.Build) !void {\n     // libghostty-vt xcframework (Apple only, universal binary).\n     // Only when building on macOS (not cross-compiling) since\n     // xcodebuild is required.\n-    if (builtin.os.tag.isDarwin() and config.target.result.os.tag.isDarwin()) {\n+    if (config.emit_lib_vt and\n+        config.emit_xcframework and\n+        builtin.os.tag.isDarwin() and\n+        config.target.result.os.tag.isDarwin())\n+    {\n         const apple_libs = try buildpkg.GhosttyLibVt.initStaticAppleUniversal(\n             b,\n             &config,\n@@ -200,8 +204,9 @@ pub fn build(b: *std.Build) !void {\n     }\n \n     // macOS only artifacts. These will error if they're initialized for\n-    // other targets.\n-    if (config.target.result.os.tag.isDarwin() and\n+    // other targets. In lib-vt mode emit_xcframework controls the lib-vt\n+    // xcframework above, not this one.\n+    if (!config.emit_lib_vt and config.target.result.os.tag.isDarwin() and\n         (config.emit_xcframework or config.emit_macos_app))\n     {\n         // Ghostty xcframework\ndiff --git a/src/build/Config.zig b/src/build/Config.zig\nindex 797a00ddb68..0a99473174e 100644\n--- a/src/build/Config.zig\n+++ b/src/build/Config.zig\n@@ -444,13 +444,22 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf\n         bool,\n         \"emit-xcframework\",\n         \"Build and install the xcframework for the macOS library.\",\n-    ) orelse !config.emit_lib_vt and\n-        builtin.target.os.tag.isDarwin() and\n-        target.result.os.tag == .macos and\n-        config.app_runtime == .none and\n-        (!config.emit_bench and\n-            !config.emit_test_exe and\n-            !config.emit_helpgen);\n+    ) orelse emit_xcfw: {\n+        if (!builtin.target.os.tag.isDarwin() or target.result.os.tag != .macos)\n+            break :emit_xcfw false;\n+        if (config.emit_lib_vt) {\n+            // In lib-vt mode default to whether xcodebuild is available,\n+            // since xcodebuild is required to produce the XCFramework.\n+            const path = expandPath(b.allocator, \"xcodebuild\") catch\n+                break :emit_xcfw false;\n+            defer if (path) |p| b.allocator.free(p);\n+            break :emit_xcfw path != null;\n+        }\n+        break :emit_xcfw config.app_runtime == .none and\n+            (!config.emit_bench and\n+                !config.emit_test_exe and\n+                !config.emit_helpgen);\n+    };\n \n     config.emit_macos_app = b.option(\n         bool,\n",
+  "golden_label": "accepted",
+  "label_notes": "First-time ghostty contributor (0xDVC, prior=0) fixing hardcoded xcframework build step that ignored emit_xcframework config on Darwin. Addressed zig fmt formatting feedback before merge."
+}
