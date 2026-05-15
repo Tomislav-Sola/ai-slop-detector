@@ -104,11 +104,14 @@ class GitHubClient:
         contributing_md = _fetch_file(repo, _CONTRIBUTING_CANDIDATES)
         agents_md = _fetch_file(repo, _AGENTS_CANDIDATES)
         merged_prs: list[dict] = []
-        for pr in repo.get_pulls(state="closed", sort="updated", direction="desc"):
-            if pr.merged:
-                merged_prs.append({"title": pr.title, "body": pr.body or ""})
-            if len(merged_prs) >= recent_n:
-                break
+        if recent_n > 0:
+            for pr in repo.get_pulls(state="closed", sort="updated", direction="desc"):
+                # merged_at is present in list responses; pr.merged is not and
+                # triggers a per-PR completion call (very slow on large repos).
+                if pr.merged_at is not None:
+                    merged_prs.append({"title": pr.title, "body": pr.body or ""})
+                if len(merged_prs) >= recent_n:
+                    break
         return {
             "contributing_md": contributing_md,
             "agents_md": agents_md,
