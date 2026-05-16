@@ -26,15 +26,20 @@ from pr_triage.state import (
 _GOLDEN_DIR = Path("tests/fixtures/golden")
 _OUTPUT_DIR = Path("outputs/eval_runs")
 
-# Maps golden label → expected pipeline decision.
-_LABEL_TO_DECISION: dict[str, str] = {
-    "accepted": "approve",
-    "rejected_quality": "request_changes",
-    "slop": "reject",
-}
+# Binary decision classes for the slop confusion matrix.
+_DECISIONS = ["approve", "reject"]
 
-# All valid decision classes for the confusion matrix.
-_DECISIONS = ["approve", "request_changes", "reject"]
+
+def _expected_decision(entry: dict) -> str:
+    """Map a fixture entry to the expected binary decision.
+
+    Prefers the explicit is_slop field; falls back to deriving from the legacy
+    3-class golden_label for fixtures that haven't been backfilled.
+    """
+    if "is_slop" in entry:
+        return "reject" if entry["is_slop"] else "approve"
+    label = entry.get("golden_label", "")
+    return "reject" if label == "slop" else "approve"
 
 
 def load_golden_entries(golden_dir: Path = _GOLDEN_DIR) -> list[dict]:
@@ -49,11 +54,14 @@ def load_golden_entries(golden_dir: Path = _GOLDEN_DIR) -> list[dict]:
 
 def entry_to_state(entry: dict) -> TriageState:
     """Reconstruct a TriageState from a golden fixture dict."""
+    # First-look mode: at PR-open time, merged is always False. Don't leak the
+    # eventual outcome into the state.
     meta = PRMetadata(
         number=entry["pr_number"],
         title=entry["title"],
         body=entry.get("body"),
         author=entry.get("author", "unknown"),
+        author_association=entry.get("author_association"),
         created_at=_parse_dt(entry.get("created_at")),
         updated_at=_parse_dt(entry.get("updated_at")),
         base_branch=entry.get("base_branch", "main"),
@@ -63,7 +71,7 @@ def entry_to_state(entry: dict) -> TriageState:
         changed_files=entry.get("changed_files", 0),
         labels=entry.get("labels", []),
         draft=entry.get("draft", False),
-        merged=entry.get("merged", False),
+        merged=False,
     )
 
     files_changed: list[str] = []
@@ -73,6 +81,9 @@ def entry_to_state(entry: dict) -> TriageState:
         else:
             files_changed.append(str(f))
 
+    # First-look mode: do NOT populate post-hoc fields (comments, closed_at). The
+    # production trigger is `on: pull_request: [opened, reopened]` where these
+    # do not exist yet. The eval simulates that.
     return TriageState(
         repo=entry["repo"],
         pr_number=entry["pr_number"],
@@ -105,52 +116,61 @@ def compute_metrics(
     *,
     skip_critics: set[str] | None = None,
 ) -> dict:
-    """Compute precision, recall, F1, and confusion matrix.
+    """Compute binary slop-detection metrics.
+
+    Primary metric: precision/recall/F1 on the slop class (positive class).
+    Secondary: 3-class breakdown over the original golden labels for analysis.
 
     Each result dict must have:
-      - golden_label: str
-      - predicted_decision: str
+      - golden_label: str  (original 3-class label)
+      - predicted_decision: str  ("approve" or "reject")
     """
+    # Binary confusion: rows=true is_slop, cols=predicted is_slop.
     confusion: dict[str, dict[str, int]] = {
         true: {pred: 0 for pred in _DECISIONS}
         for true in _DECISIONS
     }
+    # Per-golden-class breakdown (how often each legacy 3-class label gets predicted slop vs not).
+    by_class: dict[str, dict[str, int]] = {}
 
     for r in results:
-        true_dec = _LABEL_TO_DECISION.get(r["golden_label"], "request_changes")
-        pred_dec = r.get("predicted_decision", "request_changes")
+        gold_label = r.get("golden_label", "")
+        # Result rows carry the original entry's is_slop if available; fall back to label.
+        if "is_slop" in r:
+            true_dec = "reject" if r["is_slop"] else "approve"
+        else:
+            true_dec = "reject" if gold_label == "slop" else "approve"
+        pred_dec = r.get("predicted_decision", "approve")
         if true_dec in confusion and pred_dec in confusion[true_dec]:
             confusion[true_dec][pred_dec] += 1
+        by_class.setdefault(gold_label, {"approve": 0, "reject": 0})
+        if pred_dec in by_class[gold_label]:
+            by_class[gold_label][pred_dec] += 1
 
-    per_class: dict[str, dict] = {}
-    for cls in _DECISIONS:
-        tp = confusion[cls][cls]
-        fp = sum(confusion[other][cls] for other in _DECISIONS if other != cls)
-        fn = sum(confusion[cls][other] for other in _DECISIONS if other != cls)
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (2 * precision * recall / (precision + recall)
-              if (precision + recall) > 0 else 0.0)
-        per_class[cls] = {
-            "precision": round(precision, 3),
-            "recall": round(recall, 3),
-            "f1": round(f1, 3),
-            "tp": tp, "fp": fp, "fn": fn,
-        }
+    # Binary precision/recall/F1 on the slop class (reject = positive).
+    tp = confusion["reject"]["reject"]
+    fp = confusion["approve"]["reject"]
+    fn = confusion["reject"]["approve"]
+    tn = confusion["approve"]["approve"]
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)
+          if (precision + recall) > 0 else 0.0)
 
     total = len(results)
-    correct = sum(
-        1 for r in results
-        if _LABEL_TO_DECISION.get(r["golden_label"]) == r.get("predicted_decision")
-    )
+    correct = tp + tn
     accuracy = correct / total if total > 0 else 0.0
 
     return {
         "accuracy": round(accuracy, 3),
-        "per_class": per_class,
-        "confusion_matrix": confusion,
+        "slop_precision": round(precision, 3),
+        "slop_recall": round(recall, 3),
+        "slop_f1": round(f1, 3),
+        "confusion_matrix": confusion,  # binary 2x2
+        "by_golden_class": by_class,    # 3-class breakdown, secondary
         "n_total": total,
         "n_correct": correct,
+        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
     }
 
 
@@ -206,12 +226,14 @@ def run_eval(
             )
             break
         label = entry.get("golden_label", "")
-        if label not in _LABEL_TO_DECISION:
+        # Accept any fixture with an is_slop field, or one of the legacy 3-class labels.
+        if "is_slop" not in entry and label not in ("accepted", "rejected_quality", "slop"):
             continue
+        is_slop = entry.get("is_slop", label == "slop")
 
         state = entry_to_state(entry)
         if verbose:
-            print(f"  Running {entry['repo']} #{entry['pr_number']} (label={label})…")
+            print(f"  Running {entry['repo']} #{entry['pr_number']} (is_slop={is_slop}, label={label})…")
 
         try:
             final_state = run_pipeline(state, claude, rag, critic_model=effective_model)
@@ -222,26 +244,33 @@ def run_eval(
                 "repo": entry["repo"],
                 "pr_number": entry["pr_number"],
                 "golden_label": label,
-                "predicted_decision": "request_changes",
+                "is_slop": is_slop,
+                # Errors must NOT flag the PR as slop — the model didn't get to judge.
+                # Safe default = approve (no automated action). User sees the error in the run JSON.
+                "predicted_decision": "approve",
                 "error": str(exc),
             })
             continue
 
         # For ablation: re-aggregate skipping the ablated critic.
         if skip_critics and final_state.critic_outputs:
-            result = aggregate(final_state.critic_outputs, skip_critics=skip_critics)
+            result = aggregate(
+                final_state.critic_outputs,
+                skip_critics=skip_critics,
+            )
             predicted = result.decision
         else:
             predicted = (
                 final_state.aggregate_result.decision
                 if final_state.aggregate_result
-                else (final_state.aggregate_verdict.decision if final_state.aggregate_verdict else "request_changes")
+                else (final_state.aggregate_verdict.decision if final_state.aggregate_verdict else "reject")
             )
 
         results.append({
             "repo": entry["repo"],
             "pr_number": entry["pr_number"],
             "golden_label": label,
+            "is_slop": is_slop,
             "predicted_decision": predicted,
             "per_critic_scores": (
                 final_state.aggregate_result.per_critic_scores

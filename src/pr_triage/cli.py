@@ -248,9 +248,13 @@ def prelabel(
 def golden_build(
     labels_path: Path = typer.Option(Path("data/golden_labels.jsonl"), "--labels", help="Manual labels JSONL (repo, pr_number, label, notes?)."),
     candidates_dirs_csv: str = typer.Option(
-        "data/candidates,data/golden_candidates_v2",
+        "data/golden_candidates_v2,data/candidates",
         "--candidates-dirs",
-        help="Comma-separated list of candidate directories to search (in order).",
+        help=(
+            "Comma-separated list of candidate directories. Searched in order; "
+            "the first match wins. Put the newest harvest first so later-added "
+            "fields (e.g. author_association) are preserved."
+        ),
     ),
     out_dir: Path = typer.Option(Path("tests/fixtures/golden"), "--out-dir"),
     force: bool = typer.Option(False, "--force", help="Write even if class-balance requirements aren't met."),
@@ -268,8 +272,9 @@ def golden_build(
 
     typer.echo(
         f"Golden set written to {out_dir}: "
-        f"{summary['total']} total "
-        f"({summary['accepted']} accepted, "
+        f"{summary['total']} total — "
+        f"is_slop=True: {summary['is_slop']}, is_slop=False: {summary['not_slop']} "
+        f"(legacy 3-class: {summary['accepted']} accepted, "
         f"{summary['rejected_quality']} rejected_quality, "
         f"{summary['slop']} slop)"
     )
@@ -355,25 +360,28 @@ def eval(
 
     m = run["metrics"]
     cost = run.get("cost_usd", 0)
-    typer.echo(f"\nAccuracy: {m['accuracy']:.1%}  ({m['n_correct']}/{m['n_total']})  |  cost: ${cost:.4f}")
+    typer.echo(
+        f"\nSlop precision: {m['slop_precision']:.3f}   recall: {m['slop_recall']:.3f}   "
+        f"F1: {m['slop_f1']:.3f}   |   accuracy: {m['accuracy']:.1%} ({m['n_correct']}/{m['n_total']})   "
+        f"|   cost: ${cost:.4f}"
+    )
     typer.echo("")
-    typer.echo(f"{'Class':<20} {'Precision':>9} {'Recall':>8} {'F1':>8}")
-    typer.echo("-" * 48)
-    for cls, stats in m["per_class"].items():
-        typer.echo(
-            f"{cls:<20} {stats['precision']:>9.3f} {stats['recall']:>8.3f} {stats['f1']:>8.3f}"
-        )
-    typer.echo("")
-    typer.echo("Confusion matrix (rows=true, cols=predicted):")
-    decisions = ["approve", "request_changes", "reject"]
-    header = f"{'':20}" + "".join(f"{d[:8]:>10}" for d in decisions)
-    typer.echo(header)
+    typer.echo("Binary confusion matrix (rows=true is_slop, cols=predicted):")
+    decisions = ["approve", "reject"]
+    typer.echo(f"{'':22}" + "".join(f"{d:>12}" for d in decisions))
     for true_cls in decisions:
-        row = f"{true_cls:<20}" + "".join(
-            f"{m['confusion_matrix'][true_cls][pred]:>10}" for pred in decisions
-        )
+        row = f"{'not-slop' if true_cls == 'approve' else 'slop':<22}"
+        row += "".join(f"{m['confusion_matrix'][true_cls][pred]:>12}" for pred in decisions)
         typer.echo(row)
     typer.echo("")
+    by_class = m.get("by_golden_class", {})
+    if by_class:
+        typer.echo("Breakdown by golden class:")
+        typer.echo(f"{'golden_label':<22}{'predicted approve':>20}{'predicted reject':>20}")
+        for cls in ("accepted", "rejected_quality", "slop"):
+            row = by_class.get(cls, {"approve": 0, "reject": 0})
+            typer.echo(f"{cls:<22}{row.get('approve', 0):>20}{row.get('reject', 0):>20}")
+        typer.echo("")
 
     # Find the most recent output file
     runs = sorted(out_dir.glob("*.json"), reverse=True)

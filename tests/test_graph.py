@@ -203,22 +203,52 @@ def test_guidelines_critic_strips_markdown_fences():
     assert result["critic_outputs"][0].details.score == 7
 
 
+def test_guidelines_critic_recovers_from_prose_before_json():
+    """Haiku sometimes emits a prose preamble before the JSON object."""
+    noisy = "Here is my assessment:\n\n" + _CRITIC_JSON + "\n\nThanks!"
+    s = _make_state(rag_chunks=[])
+    result = guidelines_critic_node(s, _fake_client(noisy))
+    assert result["critic_outputs"][0].details.score == 7
+
+
+def test_guidelines_critic_recovers_from_invalid_backslash_escape():
+    """Critics sometimes emit raw \\x or \\d inside evidence quotes, which is invalid JSON."""
+    bad = '{"score": 4, "findings": [{"severity":"major","category":"regex","evidence":"matches \\d+ pattern"}], "citations": []}'
+    s = _make_state(rag_chunks=[])
+    result = guidelines_critic_node(s, _fake_client(bad))
+    assert result["critic_outputs"][0].details.score == 4
+
+
+def test_guidelines_critic_coerces_dict_citations():
+    """Haiku invents a richer citations schema: list of dicts instead of list of strings."""
+    rich = json.dumps({
+        "score": 6,
+        "findings": [],
+        "citations": [{"type": "evidence", "text": "CONTRIBUTING.md line 42"}],
+    })
+    s = _make_state(rag_chunks=[])
+    result = guidelines_critic_node(s, _fake_client(rich))
+    citations = result["critic_outputs"][0].details.citations
+    assert citations == ["CONTRIBUTING.md line 42"]
+
+
 # ------------------------------------------------------------------
 # emit_verdict_node
 # ------------------------------------------------------------------
 
 def test_emit_verdict_no_critics():
+    """Binary aggregator: no critic output → default to reject (flag for review)."""
     s = _make_state(size_classification="medium")
     result = emit_verdict_node(s)
-    assert result["aggregate_verdict"].decision == "request_changes"
+    assert result["aggregate_verdict"].decision == "reject"
 
 
 def test_emit_verdict_trivial_goes_through_critics():
     # Trivial PRs no longer auto-approve — they run critics like any other PR.
-    # With no critics present, aggregate falls back to request_changes.
+    # With no critics present, the binary aggregator defaults to reject.
     s = _make_state(size_classification="trivial")
     result = emit_verdict_node(s)
-    assert result["aggregate_verdict"].decision == "request_changes"
+    assert result["aggregate_verdict"].decision == "reject"
 
 
 # ------------------------------------------------------------------
@@ -279,22 +309,22 @@ def test_e2e_papertriage_pr9_key_fields():
 
     result = run_pipeline(state, client, rag, max_tokens=50_000)
 
-    # Key-field assertions (not an exact snapshot — survives prompt tweaks)
+    # Key-field assertions (not an exact snapshot — survives prompt tweaks).
+    # Binary pipeline: two critics, two decision classes.
     assert result.size_classification in {"small", "medium", "large", "trivial"}
     assert result.aggregate_verdict is not None
-    assert result.aggregate_verdict.decision in {"approve", "request_changes", "reject"}
+    assert result.aggregate_verdict.decision in {"approve", "reject"}
 
     if result.size_classification != "trivial":
-        assert len(result.critic_outputs) == 3
+        assert len(result.critic_outputs) == 2
         critic_names = {c.critic_name for c in result.critic_outputs}
-        assert "guidelines_critic" in critic_names
         assert "architecture_critic" in critic_names
         assert "slop_signals_critic" in critic_names
-        guidelines = next(c for c in result.critic_outputs if c.critic_name == "guidelines_critic")
-        assert guidelines.details is not None
-        assert 0 <= guidelines.details.score <= 10
-        assert isinstance(guidelines.details.findings, list)
-        assert all(isinstance(c, str) for c in guidelines.details.citations)
+        arch = next(c for c in result.critic_outputs if c.critic_name == "architecture_critic")
+        assert arch.details is not None
+        assert 0 <= arch.details.score <= 10
+        assert isinstance(arch.details.findings, list)
+        assert all(isinstance(c, str) for c in arch.details.citations)
 
 
 # ------------------------------------------------------------------

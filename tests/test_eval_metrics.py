@@ -13,9 +13,10 @@ def _result(golden_label: str, predicted: str) -> dict:
 # ------------------------------------------------------------------
 
 def test_perfect_accuracy():
+    """Binary metric: rejected_quality maps to approve (not slop)."""
     results = [
         _result("accepted", "approve"),
-        _result("rejected_quality", "request_changes"),
+        _result("rejected_quality", "approve"),
         _result("slop", "reject"),
     ]
     m = compute_metrics(results)
@@ -26,8 +27,8 @@ def test_perfect_accuracy():
 def test_zero_accuracy():
     results = [
         _result("accepted", "reject"),
-        _result("rejected_quality", "approve"),
-        _result("slop", "request_changes"),
+        _result("rejected_quality", "reject"),
+        _result("slop", "approve"),
     ]
     m = compute_metrics(results)
     assert m["accuracy"] == 0.0
@@ -37,7 +38,7 @@ def test_zero_accuracy():
 def test_partial_accuracy():
     results = [
         _result("accepted", "approve"),    # correct
-        _result("slop", "approve"),         # wrong
+        _result("slop", "approve"),         # wrong (slop predicted not-slop)
         _result("slop", "reject"),          # correct
     ]
     m = compute_metrics(results)
@@ -45,25 +46,27 @@ def test_partial_accuracy():
     assert abs(m["accuracy"] - 2 / 3) < 0.001
 
 
-def test_precision_recall_f1_perfect():
+def test_slop_precision_recall_f1_perfect():
+    """All slop cases predicted reject, all non-slop predicted approve."""
     results = [
         _result("accepted", "approve"),
-        _result("accepted", "approve"),
+        _result("rejected_quality", "approve"),
         _result("slop", "reject"),
     ]
     m = compute_metrics(results)
-    assert m["per_class"]["approve"]["precision"] == 1.0
-    assert m["per_class"]["approve"]["recall"] == 1.0
-    assert m["per_class"]["approve"]["f1"] == 1.0
+    assert m["slop_precision"] == 1.0
+    assert m["slop_recall"] == 1.0
+    assert m["slop_f1"] == 1.0
 
 
 def test_confusion_matrix_shape():
+    """Binary confusion matrix has only approve/reject rows and cols."""
     results = [_result("accepted", "approve")]
     m = compute_metrics(results)
     cm = m["confusion_matrix"]
-    for row in ["approve", "request_changes", "reject"]:
+    for row in ["approve", "reject"]:
         assert row in cm
-        for col in ["approve", "request_changes", "reject"]:
+        for col in ["approve", "reject"]:
             assert col in cm[row]
 
 
@@ -77,8 +80,24 @@ def test_zero_division_safe():
     """A class with 0 TP, 0 FP, 0 FN should not crash."""
     results = [_result("accepted", "approve")]
     m = compute_metrics(results)
-    # reject class has no examples → precision/recall/F1 should be 0 not error
-    assert m["per_class"]["reject"]["precision"] == 0.0
+    # No slop examples present → slop precision/recall/F1 should be 0, not error.
+    assert m["slop_precision"] == 0.0
+    assert m["slop_recall"] == 0.0
+    assert m["slop_f1"] == 0.0
+
+
+def test_by_golden_class_breakdown_kept():
+    """Secondary 3-class breakdown helps debugging — should remain in the output."""
+    results = [
+        _result("accepted", "approve"),
+        _result("rejected_quality", "reject"),  # false positive
+        _result("slop", "reject"),
+    ]
+    m = compute_metrics(results)
+    by = m["by_golden_class"]
+    assert by["accepted"]["approve"] == 1
+    assert by["rejected_quality"]["reject"] == 1
+    assert by["slop"]["reject"] == 1
 
 
 # ------------------------------------------------------------------
@@ -86,6 +105,10 @@ def test_zero_division_safe():
 # ------------------------------------------------------------------
 
 def test_entry_to_state_minimal():
+    """First-look mode: entry_to_state always sets merged=False (PR-open simulation),
+    even when the fixture records merged=True. The aggregator must not depend on
+    the eventual outcome.
+    """
     entry = {
         "repo": "o/r",
         "pr_number": 42,
@@ -98,14 +121,15 @@ def test_entry_to_state_minimal():
         "additions": 10,
         "deletions": 2,
         "changed_files": 1,
-        "merged": True,
+        "merged": True,  # fixture says merged
         "golden_label": "accepted",
         "label_notes": "",
     }
     state = entry_to_state(entry)
     assert state.repo == "o/r"
     assert state.pr_number == 42
-    assert state.metadata.merged is True
+    # First-look forces merged=False; outcome leakage is not allowed.
+    assert state.metadata.merged is False
 
 
 def test_entry_to_state_files_changed_dict_format():

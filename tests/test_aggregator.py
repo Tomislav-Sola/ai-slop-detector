@@ -42,14 +42,14 @@ def test_all_low_scores_reject():
     assert result.decision == "reject"
 
 
-def test_mid_scores_request_changes():
+def test_mid_scores_approve():
+    """Binary classifier: mid-scoring PRs are not slop → approve (maintainers review)."""
     critics = [
-        _critic("guidelines_critic", 6),
         _critic("architecture_critic", 5),
         _critic("slop_signals_critic", 6),
     ]
     result = aggregate(critics)
-    assert result.decision == "request_changes"
+    assert result.decision == "approve"
 
 
 # ------------------------------------------------------------------
@@ -128,9 +128,10 @@ def test_ablation_reweights_present_critics():
 # Edge cases
 # ------------------------------------------------------------------
 
-def test_empty_critics_returns_request_changes():
+def test_empty_critics_defaults_to_reject():
+    """No critic output is suspicious — flag as slop so a maintainer sees it."""
     result = aggregate([])
-    assert result.decision == "request_changes"
+    assert result.decision == "reject"
     assert result.confidence == 0.0
 
 

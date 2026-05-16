@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _MIN_TOTAL = 30
-_MIN_PER_CLASS = 5
+_MIN_PER_BINARY_CLASS = 5  # minimum samples on each side of is_slop True/False
 _VALID_LABELS = frozenset({"accepted", "rejected_quality", "slop"})
 _SKIP_LABEL = "skip"
 
@@ -40,7 +40,7 @@ def build_golden_set(
     out_dir: Path,
     *,
     min_total: int = _MIN_TOTAL,
-    min_per_class: int = _MIN_PER_CLASS,
+    min_per_class: int = _MIN_PER_BINARY_CLASS,
     force: bool = False,
 ) -> dict:
     """Merge manual labels with harvested candidate data into golden fixture files.
@@ -91,17 +91,23 @@ def build_golden_set(
         class_counts[entry["label"]] += 1
 
     total = sum(class_counts.values())
+    # Binary distribution: slop is the positive class; accepted+rejected_quality fold to not-slop.
+    n_slop = class_counts["slop"]
+    n_not_slop = class_counts["accepted"] + class_counts["rejected_quality"]
 
     if not force:
         if total < min_total:
             raise GoldenBuildError(
                 f"Need at least {min_total} labeled entries, got {total}"
             )
-        for cls, count in class_counts.items():
-            if count < min_per_class:
-                raise GoldenBuildError(
-                    f"Need at least {min_per_class} '{cls}' entries, got {count}"
-                )
+        if n_slop < min_per_class:
+            raise GoldenBuildError(
+                f"Need at least {min_per_class} slop entries, got {n_slop}"
+            )
+        if n_not_slop < min_per_class:
+            raise GoldenBuildError(
+                f"Need at least {min_per_class} not-slop entries, got {n_not_slop}"
+            )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     repo_counts: Counter = Counter()
@@ -119,7 +125,8 @@ def build_golden_set(
         candidate = json.loads(candidate_file.read_text())
         golden_entry = {
             **candidate,
-            "golden_label": label_entry["label"],
+            "golden_label": label_entry["label"],          # legacy 3-class, kept for analysis
+            "is_slop": label_entry["label"] == "slop",     # binary primary
             "label_notes": label_entry.get("notes", ""),
         }
 
@@ -131,11 +138,12 @@ def build_golden_set(
 
     manifest = {
         "total": written,
-        "class_counts": class_counts,
+        "class_counts": class_counts,                  # legacy 3-class breakdown
+        "binary_counts": {"slop": n_slop, "not_slop": n_not_slop},
         "repo_counts": dict(repo_counts.most_common()),
         "candidates_dirs": [str(d) for d in candidates_dirs],
         "built_at": datetime.now(tz=timezone.utc).isoformat(),
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
-    return {"total": written, **class_counts}
+    return {"total": written, "is_slop": n_slop, "not_slop": n_not_slop, **class_counts}

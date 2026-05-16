@@ -1,26 +1,27 @@
-"""Deterministic aggregator for multi-critic triage pipeline (Phase 3).
+"""Deterministic aggregator for the binary slop-detection pipeline.
 
-Weights and thresholds are intentionally configurable so ablation experiments
-can swap them without touching business logic.
+Two critics (architecture + slop_signals) emit 0-10 scores. We compute a weighted
+average, apply a veto rule for very-low individual scores, then map to a binary
+decision: "approve" (not slop) or "reject" (slop). No request_changes class —
+that's RQ territory which we explicitly do not attempt to predict at PR-open time.
 """
 from __future__ import annotations
 
 from pr_triage.state import AggregateResult, CriticOutput
 
-# Critic weights must sum to 1.0.
+# Critic weights must sum to 1.0. Binary slop-detection pipeline uses two critics.
 _DEFAULT_WEIGHTS: dict[str, float] = {
-    "guidelines_critic": 0.35,
-    "architecture_critic": 0.35,
-    "slop_signals_critic": 0.30,
+    "architecture_critic": 0.4,
+    "slop_signals_critic": 0.6,
 }
 
-# Any critic score at or below this value caps the overall score at _VETO_CAP.
-_VETO_THRESHOLD = 2
-_VETO_CAP = 4
+# Veto: any critic ≤ threshold caps the overall score to _VETO_CAP (which is below
+# _SLOP_THRESHOLD, so any veto routes to reject).
+_VETO_THRESHOLD = 3
+_VETO_CAP = 3
 
-# Overall score → recommendation thresholds.
-_APPROVE_MIN = 7
-_REQUEST_CHANGES_MIN = 4  # below this → reject
+# Overall score below this → reject (is_slop=True). At or above → approve.
+_SLOP_THRESHOLD = 5.0
 
 
 def aggregate(
@@ -29,7 +30,7 @@ def aggregate(
     weights: dict[str, float] | None = None,
     skip_critics: set[str] | None = None,
 ) -> AggregateResult:
-    """Combine critic outputs into a single deterministic verdict.
+    """Combine critic outputs into a binary slop / not-slop verdict.
 
     Args:
         critic_outputs: outputs from all critics that ran.
@@ -38,7 +39,8 @@ def aggregate(
         skip_critics: names to exclude (for ablation experiments).
 
     Returns:
-        AggregateResult with decision, per_critic_scores, and deciding_factors.
+        AggregateResult with decision ("approve" or "reject"), per-critic scores,
+        and deciding factors. is_slop is True when decision == "reject".
     """
     effective_weights = weights if weights is not None else _DEFAULT_WEIGHTS
     skip = skip_critics or set()
@@ -47,9 +49,11 @@ def aggregate(
     missing = [name for name in effective_weights if name not in present and name not in skip]
 
     if not present:
+        # No critic output is suspicious — default to "reject" so a maintainer at least sees a flag.
+        # (In production this would never happen if the pipeline ran correctly.)
         return AggregateResult(
-            decision="request_changes",
-            summary="No critic output available.",
+            decision="reject",
+            summary="No critic output available; defaulting to reject (is_slop=True).",
             confidence=0.0,
             missing_critics=missing,
         )
@@ -69,7 +73,6 @@ def aggregate(
     )
     if active_weight_sum <= 0:
         # All present critics have 0 weight — treat equally.
-        active_weight_sum = 1.0
         equal_w = 1.0 / len(present)
         normalised = {name: equal_w for name in present}
     else:
@@ -87,13 +90,8 @@ def aggregate(
     veto_applied = any(s <= _VETO_THRESHOLD for s in per_critic_scores.values())
     overall_score = min(raw_score, float(_VETO_CAP)) if veto_applied else raw_score
 
-    # Map score to recommendation.
-    if overall_score >= _APPROVE_MIN:
-        decision = "approve"
-    elif overall_score >= _REQUEST_CHANGES_MIN:
-        decision = "request_changes"
-    else:
-        decision = "reject"
+    # Binary decision.
+    decision = "approve" if overall_score >= _SLOP_THRESHOLD else "reject"
 
     # Collect the most actionable findings across all critics.
     deciding_factors: list[str] = []
@@ -116,14 +114,15 @@ def aggregate(
             f"Veto applied: a critic scored ≤{_VETO_THRESHOLD} (capped at {_VETO_CAP})",
         )
 
+    is_slop = decision == "reject"
     summary = (
-        f"Weighted score {overall_score:.1f}/10 → {decision}. "
+        f"Weighted score {overall_score:.1f}/10 → {'slop (reject)' if is_slop else 'not slop (approve)'}. "
         f"Critics: {', '.join(f'{n}={s}' for n, s in per_critic_scores.items())}."
     )
     if missing:
         summary += f" Missing: {', '.join(missing)}."
 
-    confidence = overall_score / 10.0
+    confidence = (10.0 - overall_score) / 10.0 if is_slop else overall_score / 10.0
 
     return AggregateResult(
         decision=decision,

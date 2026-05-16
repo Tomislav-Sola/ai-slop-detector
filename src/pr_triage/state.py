@@ -12,6 +12,9 @@ class PRMetadata(BaseModel):
     title: str
     body: Optional[str] = None
     author: str
+    # GitHub author_association — one of OWNER/MEMBER/COLLABORATOR/CONTRIBUTOR/NONE
+    # or None if not captured. Strong signal for trust-weighting drive-by caps.
+    author_association: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     base_branch: str
@@ -85,6 +88,12 @@ class TriageState(BaseModel):
     contributing_md: Optional[str] = None
     agents_md: Optional[str] = None
     recent_merged_titles: list[str] = Field(default_factory=list)
+    # Optional review-state fields. Available in golden fixtures and from
+    # GitHub for closed/in-progress PRs; empty for cold first-look mode.
+    closed_at: Optional[datetime] = None
+    issue_comments: list[dict] = Field(default_factory=list)
+    review_comments: list[dict] = Field(default_factory=list)
+    bot_comments: list[dict] = Field(default_factory=list)
 
     # Phase 2: pipeline outputs
     size_classification: Optional[str] = None  # "trivial"|"small"|"medium"|"large"

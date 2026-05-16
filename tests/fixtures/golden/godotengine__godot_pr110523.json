@@ -1,12 +1,13 @@
 {
   "_meta": {
-    "harvested_at": "2026-05-14T17:02:23.181033+00:00"
+    "harvested_at": "2026-05-15T17:28:47.619828+00:00"
   },
   "repo": "godotengine/godot",
   "pr_number": 110523,
   "title": "Pattern guard warning fix",
   "body": "This is an attempt to address [#110489](https://github.com/godotengine/godot/issues/110489)\r\n\r\n* Added `bool p_is_guard` parameter to `resolve_node`, `reduce_expression`, `resolve_suite` and `reduce_call`\r\n* From `resolve_match_branch` I pass `true` into `resolve_suite` when handling the guard_body\r\n* In reduce_call I don't raise an error if `p_is_guard=true`\r\n\r\nExample of warning being called for an unconsumed return as opposed to guard pattern:\r\n<img width=\"425\" height=\"200\" alt=\"image\" src=\"https://github.com/user-attachments/assets/f8f2fb0c-cfc4-4cbd-a6b1-bbf02770e78b\" />\r\n\r\n<!--\r\nPlease target the `master` branch in priority.\r\n\r\nRelevant fixes are cherry-picked for stable branches as needed by maintainers.\r\n\r\nTo speed up the contribution process and avoid CI errors, please set up pre-commit hooks locally:\r\nhttps://contributing.godotengine.org/en/latest/engine/guidelines/code_style.html\r\n-->\r\n\r\n\r\n* Fixes #110489.",
   "author": "StamLord",
+  "author_association": "CONTRIBUTOR",
   "created_at": "2025-09-14T21:13:09Z",
   "updated_at": "2026-05-14T14:59:37Z",
   "closed_at": "2026-01-29T18:16:19Z",
@@ -70,5 +71,6 @@
   "review_comments": [],
   "raw_diff": "diff --git a/modules/gdscript/gdscript_analyzer.cpp b/modules/gdscript/gdscript_analyzer.cpp\nindex d4fa515a7020..4d20119b388b 100644\n--- a/modules/gdscript/gdscript_analyzer.cpp\n+++ b/modules/gdscript/gdscript_analyzer.cpp\n@@ -2051,7 +2051,7 @@ void GDScriptAnalyzer::decide_suite_type(GDScriptParser::Node *p_suite, GDScript\n \t}\n }\n \n-void GDScriptAnalyzer::resolve_suite(GDScriptParser::SuiteNode *p_suite) {\n+void GDScriptAnalyzer::resolve_suite(GDScriptParser::SuiteNode *p_suite, bool p_is_root) {\n \tfor (int i = 0; i < p_suite->statements.size(); i++) {\n \t\tGDScriptParser::Node *stmt = p_suite->statements[i];\n \t\t// Apply annotations.\n@@ -2060,7 +2060,7 @@ void GDScriptAnalyzer::resolve_suite(GDScriptParser::SuiteNode *p_suite) {\n \t\t\tE->apply(parser, stmt, nullptr); // TODO: Provide `p_class`.\n \t\t}\n \n-\t\tresolve_node(stmt);\n+\t\tresolve_node(stmt, p_is_root);\n \t\tresolve_pending_lambda_bodies();\n \t\tdecide_suite_type(p_suite, stmt);\n \t}\n@@ -2423,7 +2423,7 @@ void GDScriptAnalyzer::resolve_match_branch(GDScriptParser::MatchBranchNode *p_m\n \t}\n \n \tif (p_match_branch->guard_body) {\n-\t\tresolve_suite(p_match_branch->guard_body);\n+\t\tresolve_suite(p_match_branch->guard_body, false);\n \t}\n \n \tresolve_suite(p_match_branch->block);\ndiff --git a/modules/gdscript/gdscript_analyzer.h b/modules/gdscript/gdscript_analyzer.h\nindex 576276471d3a..9b975a8cedd2 100644\n--- a/modules/gdscript/gdscript_analyzer.h\n+++ b/modules/gdscript/gdscript_analyzer.h\n@@ -81,7 +81,7 @@ class GDScriptAnalyzer {\n \tvoid resolve_function_signature(GDScriptParser::FunctionNode *p_function, const GDScriptParser::Node *p_source = nullptr, bool p_is_lambda = false);\n \tvoid resolve_function_body(GDScriptParser::FunctionNode *p_function, bool p_is_lambda = false);\n \tvoid resolve_node(GDScriptParser::Node *p_node, bool p_is_root = true);\n-\tvoid resolve_suite(GDScriptParser::SuiteNode *p_suite);\n+\tvoid resolve_suite(GDScriptParser::SuiteNode *p_suite, bool p_is_root = true);\n \tvoid resolve_assignable(GDScriptParser::AssignableNode *p_assignable, const char *p_kind);\n \tvoid resolve_variable(GDScriptParser::VariableNode *p_variable, bool p_is_local);\n \tvoid resolve_constant(GDScriptParser::ConstantNode *p_constant, bool p_is_local);\n",
   "golden_label": "accepted",
-  "label_notes": "GDScript pattern-guard false-warning fix. StamLord (first-time contributor) addressed reviewer guidance to reuse existing p_is_root param rather than introducing a new boolean flag."
+  "label_notes": "GDScript pattern-guard false-warning fix. StamLord (first-time contributor) addressed reviewer guidance to reuse existing p_is_root param rather than introducing a new boolean flag.",
+  "is_slop": false
 }

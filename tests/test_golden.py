@@ -93,7 +93,7 @@ def test_too_few_per_class_raises(tmp_path):
     _write_labels(labels_path, entries)
     for e in entries:
         _write_candidate(cand_dir, "o/r", e["pr_number"])
-    with pytest.raises(GoldenBuildError, match="'slop'"):
+    with pytest.raises(GoldenBuildError, match=r"slop entries"):
         build_golden_set(labels_path, [cand_dir], tmp_path / "out")
 
 
@@ -166,6 +166,33 @@ def test_build_golden_stores_notes(tmp_path):
     build_golden_set(labels_path, [cand_dir], out_dir)
     sample = json.loads((out_dir / "o__r_pr1.json").read_text())
     assert sample["label_notes"] == "obvious trivial change"
+
+
+def test_build_golden_first_candidates_dir_wins(tmp_path):
+    """Regression: golden-build searches candidate dirs in order; the first match wins.
+
+    The default in cli.py lists `data/golden_candidates_v2` BEFORE `data/candidates`
+    so newer-harvest fields (e.g. author_association) survive when the same PR is
+    present in both directories.
+    """
+    labels_path = tmp_path / "labels.jsonl"
+    cand_new = tmp_path / "cands_new"
+    cand_old = tmp_path / "cands_old"
+    cand_new.mkdir()
+    cand_old.mkdir()
+    out_dir = tmp_path / "out"
+
+    _make_full_label_set(labels_path, cand_new)
+    # Also write the same PRs into the older dir, but WITHOUT author_association.
+    for n in range(1, 31):
+        _write_candidate(cand_old, "o/r", n)
+    # The newer dir has the field populated for PR #1.
+    _write_candidate(cand_new, "o/r", 1, author_association="MEMBER")
+
+    # Newer dir first → MEMBER survives.
+    build_golden_set(labels_path, [cand_new, cand_old], out_dir)
+    pr1 = json.loads((out_dir / "o__r_pr1.json").read_text())
+    assert pr1["author_association"] == "MEMBER"
 
 
 def test_build_golden_force_bypasses_validation(tmp_path):
