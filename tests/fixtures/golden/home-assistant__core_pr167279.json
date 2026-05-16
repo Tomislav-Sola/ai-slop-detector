@@ -53,7 +53,5 @@
   ],
   "review_comments": [],
   "raw_diff": "diff --git a/homeassistant/components/matter/fan.py b/homeassistant/components/matter/fan.py\nindex 823451113e0ed..6195030a7405c 100644\n--- a/homeassistant/components/matter/fan.py\n+++ b/homeassistant/components/matter/fan.py\n@@ -323,7 +323,11 @@ def _calculate_features(\n         required_attributes=(\n             clusters.FanControl.Attributes.FanMode,\n             clusters.FanControl.Attributes.PercentCurrent,\n+            clusters.FanControl.Attributes.PercentSetting,\n         ),\n+        # PercentSetting SHALL be null when FanMode is Auto (spec 4.4.6.3),\n+        # so allow null values to not block discovery in that state.\n+        allow_none_value=True,\n         optional_attributes=(\n             clusters.FanControl.Attributes.SpeedSetting,\n             clusters.FanControl.Attributes.RockSetting,\n",
-  "golden_label": "accepted",
-  "label_notes": "Targeted Matter Fan null-safety fix by lboue (CONTRIBUTOR, prior=194). One-file guard allowing FanPercent=null when FanMode is Auto, merged cleanly by experienced HA integration contributor.",
   "is_slop": false
 }

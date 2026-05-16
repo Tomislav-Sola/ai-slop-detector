@@ -1,10 +1,5 @@
 {
   "total": 50,
-  "class_counts": {
-    "accepted": 20,
-    "rejected_quality": 20,
-    "slop": 10
-  },
   "binary_counts": {
     "slop": 10,
     "not_slop": 40
@@ -20,5 +15,5 @@
     "tldraw/tldraw": 2
   },
   "built_at": "2026-05-16T15:16:29.095258+00:00",
-  "note": "3 fixtures archived 2026-05-16: signals only available post-hoc (timing/coverage/external-knowledge). See tests/fixtures/golden_archive_post_hoc_only/README.md."
+  "note": "50 entries (10 slop / 40 not-slop). is_slop is the only label."
 }

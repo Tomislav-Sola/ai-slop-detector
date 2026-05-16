@@ -15,11 +15,9 @@
 
 ## Product framing
 
-- **Binary slop classifier.** Output is `is_slop: bool` (`approve` = not slop / `reject` = slop). No 3-class output. RQ and accepted both fold to not-slop because:
-  - Maintainers still review not-slop PRs as normal — the Action's job is filtering AI slop, not arbitrating quality.
-  - At PR-open time (when the Action fires), RQ vs accepted is structurally indistinguishable from content alone.
+- **Binary slop classifier.** Output is `is_slop: bool` (`approve` = not slop / `reject` = slop). Maintainers still review the not-slop bucket as normal — the Action's job is filtering AI slop, not arbitrating quality. At PR-open time everything that isn't clearly slop is indistinguishable from content alone, so there is nothing more granular to predict.
 - **First-look mode only.** The pipeline runs once per PR, triggered by `on: pull_request: [opened, reopened]`. No re-triage; closing/comments/timing are not used by critics or the aggregator.
-- **Two critics, parallel fan-out.** `architecture_critic` (over-engineering, AI-explanatory docstrings, wrong-arch-layer) + `slop_signals_critic` (AI footer, drive-by overreach, manipulative @-mention, AI-checklist theatre, sibling-repo mismatch, heuristics). `guidelines_critic` was dropped — RQ-territory, marginal signal for slop.
+- **Two critics, parallel fan-out.** `architecture_critic` (over-engineering, AI-explanatory docstrings, wrong-arch-layer) + `slop_signals_critic` (AI footer, drive-by overreach, manipulative @-mention, AI-checklist theatre, sibling-repo mismatch, heuristics).
 
 ## Architecture
 
@@ -45,9 +43,8 @@ src/pr_triage/
 
 ## Labels
 
-- **Primary:** `is_slop: bool` on every golden fixture and label entry.
-- **Legacy:** `golden_label` (`accepted` | `rejected_quality` | `slop`) is kept as auxiliary metadata for analysis (the original Opus-4.7 labeling rationale lives in `label_notes` per entry).
-- New code paths must read `is_slop` directly; only fall back to deriving from `golden_label` for backward compat with older fixtures.
+- `is_slop: bool` on every golden fixture and label entry. That is the only label.
+- The labels JSONL written by `pr-triage label` is `{"repo", "pr_number", "is_slop"}` (or `{"skip": true}` for skips).
 
 ## Model routing
 
@@ -60,5 +57,5 @@ src/pr_triage/
 
 - **Phase 1 (done):** repo skeleton, ClaudeClient stub, GitHub PR ingestion, CLI `fetch`.
 - **Phase 2 (done):** real ClaudeClient, ChromaDB RAG, LangGraph single-critic pipeline, CLI `check` + `index`.
-- **Phase 3 (done):** golden-set construction (50 entries, 8 repos, 10 slop / 40 not-slop), binary slop classification end-to-end (core pipeline + prelabel + labeler + eval viewer + eval harness), first-look mode, two-critic pipeline (architecture + slop_signals), deterministic binary aggregator (veto rule + single `_SLOP_THRESHOLD`), dollar cost guardrail. All tools emit `is_slop` as primary while keeping the legacy 3-class label as auxiliary metadata. Full-set eval at PR-open (Sonnet): precision 0.714, recall 1.000, F1 0.833, accuracy 92.0% (46/50), ~$0.03/PR. Three slop fixtures whose signals require post-hoc data archived under `tests/fixtures/golden_archive_post_hoc_only/`.
+- **Phase 3 (done):** golden-set construction (50 entries, 8 repos, 10 slop / 40 not-slop), binary slop classification end-to-end (core pipeline + prelabel + labeler + eval viewer + eval harness), first-look mode, two-critic pipeline (architecture + slop_signals), deterministic binary aggregator (veto rule + single `_SLOP_THRESHOLD`), dollar cost guardrail. Full-set eval at PR-open (Sonnet): precision 0.714, recall 1.000, F1 0.833, accuracy 92.0% (46/50), ~$0.03/PR.
 - **Phase 4:** GitHub Action packaging — `action.yml`, Dockerfile, marketplace publish, optional `is_slop` label-write or PR-comment in the target repo.

@@ -55,33 +55,17 @@ def _member_comment(body: str, *, hours_before_close: float = 1) -> dict:
 def test_accepted_merged():
     c = _cand(merged=True)
     r = prelabel_candidate(c)
-    assert r["label"] == "accepted"
+    assert r["is_slop_likely"] is False
     assert r["is_slop_likely"] is False
     assert r["confidence"] == "high"
     assert r["signals"] == []
-
-
-def test_is_slop_likely_is_true_for_slop_label():
-    """The binary is_slop_likely must mirror label=='slop'."""
-    c = _cand(body="Generated with Claude Code — see https://claude.com/claude-code")
-    r = prelabel_candidate(c)
-    assert r["label"] == "slop"
-    assert r["is_slop_likely"] is True
-
-
-def test_is_slop_likely_false_for_rejected_quality():
-    """rejected_quality is not slop — binary must reflect that."""
-    c = _cand(issue_comments=[_maintainer_comment("could use more tests")])
-    r = prelabel_candidate(c)
-    assert r["label"] == "rejected_quality"
-    assert r["is_slop_likely"] is False
 
 
 def test_accepted_ignores_slop_signals_when_merged():
     # Even if body has AI keywords, merged PR → accepted
     c = _cand(merged=True, body="This was written by ChatGPT")
     r = prelabel_candidate(c)
-    assert r["label"] == "accepted"
+    assert r["is_slop_likely"] is False
 
 
 # ------------------------------------------------------------------
@@ -92,7 +76,7 @@ def test_unclear_no_comments_no_signals():
     c = _cand(merged=False, issue_comments=[], review_comments=[],
               author_prior_prs_in_repo=10)  # veteran — no silent_slop trigger
     r = prelabel_candidate(c)
-    assert r["label"] == "unclear"
+    assert r["is_slop_likely"] is False
     assert r["confidence"] == "low"
     assert r["signals"] == []
 
@@ -101,7 +85,7 @@ def test_unclear_no_closed_at():
     # Open PR (no closed_at) — no signals possible
     c = _cand(merged=False, closed_at=None, issue_comments=[], review_comments=[])
     r = prelabel_candidate(c)
-    assert r["label"] == "unclear"
+    assert r["is_slop_likely"] is False
 
 
 # ------------------------------------------------------------------
@@ -111,7 +95,7 @@ def test_unclear_no_closed_at():
 def test_rejected_quality_member_comment():
     c = _cand(issue_comments=[_member_comment("Code style issues.")])
     r = prelabel_candidate(c)
-    assert r["label"] == "rejected_quality"
+    assert r["is_slop_likely"] is False
     assert r["confidence"] == "medium"
     assert r["signals"] == []
 
@@ -125,7 +109,7 @@ def test_rejected_quality_owner_comment():
     }
     c = _cand(issue_comments=[comment])
     r = prelabel_candidate(c)
-    assert r["label"] == "rejected_quality"
+    assert r["is_slop_likely"] is False
 
 
 def test_rejected_quality_contributor_comment_fires():
@@ -138,7 +122,7 @@ def test_rejected_quality_contributor_comment_fires():
     }
     c = _cand(issue_comments=[comment])
     r = prelabel_candidate(c)
-    assert r["label"] == "rejected_quality"
+    assert r["is_slop_likely"] is False
 
 
 def test_rejected_quality_none_association_not_maintainer():
@@ -150,7 +134,7 @@ def test_rejected_quality_none_association_not_maintainer():
     }
     c = _cand(issue_comments=[comment])
     r = prelabel_candidate(c)
-    assert r["label"] == "unclear"  # NONE is not in maintainer set
+    assert r["is_slop_likely"] is False  # NONE is not in maintainer set; no slop signal
 
 
 # ------------------------------------------------------------------
@@ -165,7 +149,7 @@ def test_rejected_quality_none_association_not_maintainer():
 def test_ai_disclosure_body_keyword(keyword):
     c = _cand(body=f"This PR was created using {keyword}.")
     r = prelabel_candidate(c)
-    assert r["label"] == "slop"
+    assert r["is_slop_likely"] is True
     assert "ai_disclosure_or_mention" in r["signals"]
 
 
@@ -179,7 +163,7 @@ def test_ai_disclosure_in_issue_comment():
 def test_ai_disclosure_not_fired_when_merged():
     c = _cand(merged=True, body="Generated with Claude Code")
     r = prelabel_candidate(c)
-    assert r["label"] == "accepted"
+    assert r["is_slop_likely"] is False
     assert "ai_disclosure_or_mention" not in r["signals"]
 
 
@@ -330,7 +314,7 @@ def test_maintainer_explicit_no_matching_phrase():
     c = _cand(issue_comments=[_maintainer_comment("Thanks for the contribution!")])
     r = prelabel_candidate(c)
     assert "maintainer_explicit_rejection" not in r["signals"]
-    assert r["label"] == "rejected_quality"  # maintainer comment → rejected_quality
+    assert r["is_slop_likely"] is False  # maintainer comment, no slop signal
 
 
 # ------------------------------------------------------------------
@@ -340,7 +324,7 @@ def test_maintainer_explicit_no_matching_phrase():
 def test_confidence_one_signal_low():
     c = _cand(body="Written by AI")
     r = prelabel_candidate(c)
-    assert r["label"] == "slop"
+    assert r["is_slop_likely"] is True
     assert r["confidence"] == "low"
     assert len(r["signals"]) == 1
 
@@ -356,7 +340,7 @@ def test_confidence_two_signals_medium():
         deletions=30,
     )
     r = prelabel_candidate(c)
-    assert r["label"] == "slop"
+    assert r["is_slop_likely"] is True
     assert r["confidence"] == "medium"
     assert len(r["signals"]) == 2
 
@@ -386,7 +370,7 @@ def test_confidence_three_signals_high():
         deletions=30,
     )
     r = prelabel_candidate(c)
-    assert r["label"] == "slop"
+    assert r["is_slop_likely"] is True
     assert r["confidence"] == "medium"
     assert "ai_disclosure_or_mention" in r["signals"]
     assert "maintainer_explicit_rejection" in r["signals"]
@@ -448,16 +432,17 @@ def test_prelabel_dir_writes_jsonl(tmp_path):
 
     lines = [json.loads(l) for l in out_path.read_text().splitlines() if l.strip()]
     assert len(lines) == 3
-    labels = {l["pr_number"]: l["label"] for l in lines}
-    assert labels[1] == "accepted"
-    assert labels[2] == "slop"
-    assert labels[3] == "unclear"
+    by_pr = {l["pr_number"]: l for l in lines}
+    assert by_pr[1]["is_slop_likely"] is False  # merged → not slop
+    assert by_pr[2]["is_slop_likely"] is True   # AI body → slop
+    assert by_pr[3]["is_slop_likely"] is False  # no engagement, no signal → not slop
 
     # Output schema check
     for line in lines:
-        assert "label" in line
+        assert "is_slop_likely" in line
         assert "confidence" in line
         assert "signals" in line
+        assert "label" not in line
         assert isinstance(line["signals"], list)
 
 

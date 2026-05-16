@@ -3,9 +3,8 @@
 Launch via:  pr-triage view  [--run path/to/run.json]
 
 Binary slop classifier view: summary metrics on the slop class (precision,
-recall, F1), 2x2 confusion matrix, per-critic score distributions, and a
-disagreements table where the model's verdict differed from the golden
-is_slop label. The legacy 3-class `golden_label` is shown as auxiliary context.
+recall, F1), 2x2 confusion matrix, and a disagreements table split into
+false positives and false negatives.
 """
 from __future__ import annotations
 
@@ -41,10 +40,8 @@ results = run["results"]
 
 
 def _result_is_slop(r: dict) -> bool:
-    """Read is_slop from a result row; fall back to deriving from legacy golden_label."""
-    if "is_slop" in r:
-        return bool(r["is_slop"])
-    return r.get("golden_label") == "slop"
+    """Read is_slop from a result row."""
+    return bool(r.get("is_slop", False))
 
 
 st.caption(
@@ -88,7 +85,7 @@ if errored:
         for r in errored:
             st.write(
                 f"- **{r['repo']} #{r['pr_number']}** "
-                f"(is_slop={r.get('is_slop', '?')}, legacy={r.get('golden_label', '?')}): "
+                f"(is_slop={r.get('is_slop', '?')}): "
                 f"`{r.get('error', '')[:200]}`"
             )
 
@@ -157,13 +154,11 @@ golden_dir = Path(run.get("golden_dir", "tests/fixtures/golden"))
 
 
 def _render_entry(r: dict, kind: str) -> None:
-    gold_label = r.get("golden_label", "?")
     pred = r.get("predicted_decision", "?")
     is_slop = _result_is_slop(r)
     header = (
         f"{r['repo']} #{r['pr_number']}  |  "
-        f"is_slop=**{is_slop}** (legacy: {gold_label})  |  "
-        f"Predicted: **{pred}**"
+        f"is_slop=**{is_slop}**  |  Predicted: **{pred}**"
     )
     with st.expander(header):
         safe = r["repo"].replace("/", "__")
@@ -177,8 +172,6 @@ def _render_entry(r: dict, kind: str) -> None:
                 f"prior_prs={entry.get('author_prior_prs_in_repo')}  |  "
                 f"+{entry.get('additions', 0)}/-{entry.get('deletions', 0)}"
             )
-            if entry.get("label_notes"):
-                st.info(f"Label notes: {entry['label_notes']}")
 
             scores = r.get("per_critic_scores", {})
             if scores:
@@ -197,7 +190,7 @@ def _render_entry(r: dict, kind: str) -> None:
 
 if false_positives:
     st.subheader(f"False positives — not-slop PRs flagged as slop ({len(false_positives)})")
-    st.caption("These hurt user trust the most. Investigate the critic scores and label_notes to understand the model's reasoning.")
+    st.caption("These hurt user trust the most. Investigate the critic scores to understand the model's reasoning.")
     for r in false_positives:
         _render_entry(r, "fp")
 

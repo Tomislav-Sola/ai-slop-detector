@@ -31,15 +31,8 @@ _DECISIONS = ["approve", "reject"]
 
 
 def _expected_decision(entry: dict) -> str:
-    """Map a fixture entry to the expected binary decision.
-
-    Prefers the explicit is_slop field; falls back to deriving from the legacy
-    3-class golden_label for fixtures that haven't been backfilled.
-    """
-    if "is_slop" in entry:
-        return "reject" if entry["is_slop"] else "approve"
-    label = entry.get("golden_label", "")
-    return "reject" if label == "slop" else "approve"
+    """Map a fixture entry to the expected binary decision."""
+    return "reject" if entry.get("is_slop", False) else "approve"
 
 
 def load_golden_entries(golden_dir: Path = _GOLDEN_DIR) -> list[dict]:
@@ -116,13 +109,10 @@ def compute_metrics(
     *,
     skip_critics: set[str] | None = None,
 ) -> dict:
-    """Compute binary slop-detection metrics.
-
-    Primary metric: precision/recall/F1 on the slop class (positive class).
-    Secondary: 3-class breakdown over the original golden labels for analysis.
+    """Compute binary slop-detection metrics: precision / recall / F1 on the slop class.
 
     Each result dict must have:
-      - golden_label: str  (original 3-class label)
+      - is_slop: bool  (the ground-truth label)
       - predicted_decision: str  ("approve" or "reject")
     """
     # Binary confusion: rows=true is_slop, cols=predicted is_slop.
@@ -130,22 +120,12 @@ def compute_metrics(
         true: {pred: 0 for pred in _DECISIONS}
         for true in _DECISIONS
     }
-    # Per-golden-class breakdown (how often each legacy 3-class label gets predicted slop vs not).
-    by_class: dict[str, dict[str, int]] = {}
 
     for r in results:
-        gold_label = r.get("golden_label", "")
-        # Result rows carry the original entry's is_slop if available; fall back to label.
-        if "is_slop" in r:
-            true_dec = "reject" if r["is_slop"] else "approve"
-        else:
-            true_dec = "reject" if gold_label == "slop" else "approve"
+        true_dec = "reject" if r.get("is_slop", False) else "approve"
         pred_dec = r.get("predicted_decision", "approve")
         if true_dec in confusion and pred_dec in confusion[true_dec]:
             confusion[true_dec][pred_dec] += 1
-        by_class.setdefault(gold_label, {"approve": 0, "reject": 0})
-        if pred_dec in by_class[gold_label]:
-            by_class[gold_label][pred_dec] += 1
 
     # Binary precision/recall/F1 on the slop class (reject = positive).
     tp = confusion["reject"]["reject"]
@@ -167,7 +147,6 @@ def compute_metrics(
         "slop_recall": round(recall, 3),
         "slop_f1": round(f1, 3),
         "confusion_matrix": confusion,  # binary 2x2
-        "by_golden_class": by_class,    # 3-class breakdown, secondary
         "n_total": total,
         "n_correct": correct,
         "tp": tp, "fp": fp, "fn": fn, "tn": tn,
@@ -226,15 +205,13 @@ def run_eval(
                 flush=True,
             )
             break
-        label = entry.get("golden_label", "")
-        # Accept any fixture with an is_slop field, or one of the legacy 3-class labels.
-        if "is_slop" not in entry and label not in ("accepted", "rejected_quality", "slop"):
+        if "is_slop" not in entry:
             continue
-        is_slop = entry.get("is_slop", label == "slop")
+        is_slop = bool(entry["is_slop"])
 
         state = entry_to_state(entry)
         if verbose:
-            print(f"  Running {entry['repo']} #{entry['pr_number']} (is_slop={is_slop}, label={label})…")
+            print(f"  Running {entry['repo']} #{entry['pr_number']} (is_slop={is_slop})…")
 
         try:
             final_state = run_pipeline(state, claude, rag, critic_model=effective_model)
@@ -244,7 +221,6 @@ def run_eval(
             results.append({
                 "repo": entry["repo"],
                 "pr_number": entry["pr_number"],
-                "golden_label": label,
                 "is_slop": is_slop,
                 # Errors must NOT flag the PR as slop — the model didn't get to judge.
                 # Safe default = approve (no automated action). User sees the error in the run JSON.
@@ -270,7 +246,6 @@ def run_eval(
         results.append({
             "repo": entry["repo"],
             "pr_number": entry["pr_number"],
-            "golden_label": label,
             "is_slop": is_slop,
             "predicted_decision": predicted,
             "per_critic_scores": (

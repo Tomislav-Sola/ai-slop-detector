@@ -56,8 +56,6 @@
     }
   ],
   "raw_diff": "diff --git a/lib/curl_share.c b/lib/curl_share.c\nindex 94d53e8911ad..386a2b547d33 100644\n--- a/lib/curl_share.c\n+++ b/lib/curl_share.c\n@@ -281,7 +281,6 @@ CURLSHcode curl_share_setopt(CURLSH *sh, CURLSHoption option, ...)\n   case CURLSHOPT_UNSHARE:\n     /* this is a type this share will no longer share */\n     type = va_arg(param, int);\n-    share->specifier &= ~(unsigned int)(1 << type);\n     switch(type) {\n     case CURL_LOCK_DATA_DNS:\n       break;\n@@ -325,6 +324,8 @@ CURLSHcode curl_share_setopt(CURLSH *sh, CURLSHoption option, ...)\n       res = CURLSHE_BAD_OPTION;\n       break;\n     }\n+    if(!res)\n+      share->specifier &= ~(unsigned int)(1 << type);\n     break;\n \n   case CURLSHOPT_LOCKFUNC:\n",
-  "golden_label": "rejected_quality",
-  "label_notes": "Maintainer self-close (bagder) of real UB fix for #21224 due to CI test failure (testclutch flagged Test 1501 in 12 jobs, not flaky). Substantive engineering, real technical discussion with Copilot review. Different rejected_quality sub-pattern: maintainer-CI-driven-self-close vs. first-time-contributor silent rejects. Adds curl repo diversity to rejected_quality class.",
   "author_association": "MEMBER",
   "is_slop": false
 }

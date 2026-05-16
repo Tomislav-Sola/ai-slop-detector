@@ -33,18 +33,15 @@ _MAINTAINER_ASSOCIATIONS = frozenset({"MEMBER", "OWNER", "COLLABORATOR", "CONTRI
 
 
 def prelabel_candidate(candidate: dict) -> dict:
-    """Assign a heuristic pre-label to a single PR candidate dict.
+    """Assign a binary heuristic pre-label to a single PR candidate dict.
 
-    Returns {"is_slop_likely": bool, "label": str, "confidence": str, "signals": list[str]}.
+    Returns {"is_slop_likely": bool, "confidence": "low"|"medium"|"high", "signals": list[str]}.
 
-    The binary `is_slop_likely` is the primary output for downstream consumers.
-    The legacy 3-class `label` is kept so the human labeler can show a finer-grained
-    suggestion (accepted vs rejected_quality) for not-slop PRs:
-
-      accepted         — merged PR (high confidence; is_slop_likely=False)
-      slop             — closed-unmerged + one or more slop signals (is_slop_likely=True)
-      rejected_quality — closed-unmerged + maintainer comment, no slop signal (is_slop_likely=False)
-      unclear          — closed-unmerged, no comments, no slop signal (is_slop_likely=False)
+    Heuristic rules:
+      - merged PR                                       → is_slop_likely=False, confidence=high
+      - closed-unmerged + 1+ slop signals               → is_slop_likely=True,  confidence by signal count
+      - closed-unmerged + maintainer comment, no signal → is_slop_likely=False, confidence=medium
+      - closed-unmerged, no engagement, no signal       → is_slop_likely=False, confidence=low
 
     Slop confidence stacks by signal count: 1 → low, 2 → medium, 3+ → high.
     """
@@ -60,7 +57,7 @@ def prelabel_candidate(candidate: dict) -> dict:
     all_comments = issue_comments + review_comments
 
     if merged:
-        return {"is_slop_likely": False, "label": "accepted", "confidence": "high", "signals": []}
+        return {"is_slop_likely": False, "confidence": "high", "signals": []}
 
     slop_signals: list[str] = []
 
@@ -87,12 +84,12 @@ def prelabel_candidate(candidate: dict) -> dict:
     if slop_signals:
         n = len(slop_signals)
         confidence = "low" if n == 1 else ("medium" if n == 2 else "high")
-        return {"is_slop_likely": True, "label": "slop", "confidence": confidence, "signals": slop_signals}
+        return {"is_slop_likely": True, "confidence": confidence, "signals": slop_signals}
 
     if _has_maintainer_comment(all_comments):
-        return {"is_slop_likely": False, "label": "rejected_quality", "confidence": "medium", "signals": []}
+        return {"is_slop_likely": False, "confidence": "medium", "signals": []}
 
-    return {"is_slop_likely": False, "label": "unclear", "confidence": "low", "signals": []}
+    return {"is_slop_likely": False, "confidence": "low", "signals": []}
 
 
 def _has_maintainer_comment(comments: list[dict]) -> bool:
@@ -158,8 +155,7 @@ def prelabel_dir(
                 "additions": candidate.get("additions", 0),
                 "deletions": candidate.get("deletions", 0),
                 "changed_files_count": candidate.get("changed_files", 0),
-                "is_slop_likely": result["is_slop_likely"],   # binary primary
-                "label": result["label"],                      # legacy 3-class hint for the labeler
+                "is_slop_likely": result["is_slop_likely"],
                 "confidence": result["confidence"],
                 "signals": result["signals"],
             }
@@ -167,7 +163,7 @@ def prelabel_dir(
             if verbose:
                 sigs = ",".join(result["signals"]) if result["signals"] else "-"
                 binary = "slop" if result["is_slop_likely"] else "not-slop"
-                print(f"  {candidate_file.name}: {binary} ({result['confidence']}) [legacy={result['label']}, {sigs}]")
+                print(f"  {candidate_file.name}: {binary} ({result['confidence']}) [{sigs}]")
             count += 1
 
     return count
