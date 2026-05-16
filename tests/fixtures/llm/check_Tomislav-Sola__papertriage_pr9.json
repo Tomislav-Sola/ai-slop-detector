@@ -1,6 +1,5 @@
 [
   "medium",
-  "{\"score\": 6, \"findings\": [{\"severity\": \"major\", \"category\": \"testing\", \"evidence\": \"no new test files added for src/papertriage/graph/builder.py \u2014 the new knowledge-graph module\"}, {\"severity\": \"minor\", \"category\": \"documentation\", \"evidence\": \"README.md updated but the knowledge graph section contains no usage examples\"}, {\"severity\": \"info\", \"category\": \"naming\", \"evidence\": \"builder.py follows the existing module naming convention\"}], \"citations\": [\"merged-pr:0\", \"merged-pr:1\"]}",
   "{\"score\": 6, \"findings\": [{\"severity\": \"minor\", \"category\": \"abstraction\", \"evidence\": \"new abstraction layer may be premature\"}], \"citations\": []}",
   "{\"score\": 8, \"findings\": [], \"citations\": []}"
 ]
