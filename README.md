@@ -1,35 +1,72 @@
 # pr-triage
 
-A CLI tool and GitHub Action that triages pull requests using a multi-critic LangGraph pipeline with RAG. Built to help OSS maintainers handle the surge of low-quality, AI-generated PRs.
+A CLI tool (and planned GitHub Action) that flags AI-slop pull requests using a multi-critic LangGraph pipeline with RAG. Built to help OSS maintainers handle the surge of low-effort, AI-generated PRs.
 
 This is portfolio project #2, built in public.
 
 ## What this is
 
-`pr-triage check <owner/repo> <pr_number>` fetches a PR from GitHub, retrieves relevant guideline context from a per-repo ChromaDB index, classifies the PR size, and runs three critics in parallel (guidelines compliance, architecture consistency, slop signals). A deterministic aggregator applies a veto rule and emits a structured verdict with score, findings, and citations.
+Binary slop classifier for pull requests. `pr-triage check <owner/repo> <pr_number>` fetches a PR from GitHub, retrieves project context from a per-repo ChromaDB index, classifies the PR size, runs two critics in parallel (`architecture_critic`, `slop_signals_critic`), and emits one of two verdicts:
+
+- `approve` — not slop. Maintainers review as normal.
+- `reject` — looks like AI slop. Maintainers can close or ask the author to revise.
+
+The Action is designed to fire **once** per PR at `on: pull_request: [opened, reopened]`. At that moment maintainer comments, CI timing, and merge status don't exist yet — the critics judge from PR content + author signals + heuristics + RAG only ("first-look mode").
 
 ## Phase 3 deliverables
 
-- **53-entry golden set** — 20 accepted, 20 rejected (quality), 13 slop, spanning 8 repos (ruff, pydantic, poetry, godot, Home Assistant, ghostty, curl, tldraw)
-- **Three critics in parallel** — `guidelines_critic`, `architecture_critic`, `slop_signals_critic`; wired as a LangGraph parallel fan-out/fan-in with `operator.add` reducer
-- **Deterministic aggregator** with veto rule: any critic score ≤ 4 → `request_changes`; majority otherwise
-- **`pr-triage eval`** — runs the full pipeline against the golden set, emits a JSON results file with per-entry verdicts, accuracy, and cost
-- **`pr-triage view`** — Streamlit eval viewer for browsing results (score heatmaps, findings, side-by-side diff)
-- **`pr-triage label`** — Streamlit manual labeling tool for building the golden set
-- **`pr-triage prelabel` / `harvest`** — automated harvest and heuristic pre-labeling pipeline
-- **`pr-triage golden-build`** — CLI builder for golden fixture files
-- **Per-critic model split** — `guidelines_critic` and `architecture_critic` use Sonnet; `slop_signals_critic` uses Haiku by default; `eval` defaults to all-Haiku with `--model sonnet` override
-- **Dollar cost guardrail** — `MAX_EVAL_COST_USD` in `.env` stops the eval loop before it exceeds budget
-- **Cost tracking** — `ClaudeClient.total_cost_usd` property; printed after every eval run
+- **50-entry golden set** — 10 slop, 40 not-slop, spanning 8 repos (ruff, pydantic, poetry, godot, Home Assistant, ghostty, curl, tldraw). `is_slop: bool` is the primary label; the original 3-class `golden_label` is kept as auxiliary metadata for analysis. Three additional fixtures whose slop signals are only available post-hoc (timing, coverage report, external knowledge) live under `tests/fixtures/golden_archive_post_hoc_only/` for use by any future re-triage mode.
+- **Two critics in parallel** — `architecture_critic` (over-engineering, AI-explanatory docstrings, wrong-arch-layer) + `slop_signals_critic` (AI footer, drive-by overreach, manipulative @-mention, AI-checklist theatre, sibling-repo mismatch, heuristic features). LangGraph fan-out/fan-in with `operator.add` reducer.
+- **Deterministic binary aggregator** — weighted score (slop 0.6, arch 0.4), veto rule (any critic ≤ 3 caps overall at 3), single `_SLOP_THRESHOLD = 5.0`. Output: `approve` or `reject`.
+- **`pr-triage eval`** — runs the pipeline against the golden set, emits binary precision/recall/F1 on the slop class plus a per-golden-class breakdown.
+- **`pr-triage view`** — Streamlit eval viewer. Shows slop precision/recall/F1, binary confusion matrix, and a disagreements table split into false positives and false negatives.
+- **`pr-triage label`** — Streamlit manual labeling tool. Primary verdict is binary (Slop / Not slop); the legacy 3-class refinement is available in a collapsible section for offline analysis only.
+- **`pr-triage prelabel` / `harvest`** — automated harvest and heuristic pre-labeling pipeline. `prelabel` emits `is_slop_likely: bool` as the primary output alongside the legacy 3-class hint.
+- **`pr-triage golden-build`** — CLI builder; validates min slop / not-slop counts; writes `is_slop` into every fixture.
+- **Dollar cost guardrail** — `MAX_EVAL_COST_USD` in `.env` stops the eval loop before it exceeds budget.
+- **Cost tracking** — `ClaudeClient.total_cost_usd`; printed after every eval run.
 
-**Eval results (2026-05-15, 53-entry golden set):**
+**Eval results (2026-05-16, first-look mode, full 50-entry golden set, Sonnet):**
 
-| Run | Model | RAG | Accuracy | Cost/run |
-|-----|-------|-----|----------|----------|
-| Baseline | Sonnet | No | 50.9% (27/53) | ~$2–4 |
-| Mixed | Haiku critics | 8 repos | 43.4% (23/53) | $0.72 |
+| Metric | Value |
+|---|---|
+| Slop precision | **0.714** (10 TP / 14 flagged) |
+| Slop recall | **1.000** (10/10 slop caught) |
+| Slop F1 | **0.833** |
+| Accuracy | 92.0% (46/50) |
+| Cost per PR | ~$0.025–0.035 |
 
-The gap is mainly Haiku's near-zero slop recall (0.077 vs 0.385 for Sonnet). A clean mixed-model run (Sonnet for all three critics) is the next step before tagging v0.3.0.
+**Zero false positives on accepted PRs (20/20 correct).** The 4 false positives are all `rejected_quality` PRs whose diffs carry slop-adjacent content signals (over-engineered patches, AI-style docstrings, drive-by overreach). The labeler called them RQ for design reasons not visible in the diff; the model can't see the design reasons but does see the slop-style content. In production those FPs still surface PRs worth a closer look — they're not arbitrary noise.
+
+Breakdown by legacy 3-class label:
+
+| Golden | n | Predicted approve | Predicted reject |
+|---|---|---|---|
+| accepted | 20 | **20 ✓** | 0 |
+| rejected_quality | 20 | 16 | 4 (slop-adjacent content) |
+| slop | 10 | 0 | **10 ✓** |
+
+## How scoring works
+
+Each critic emits an integer score on **0–10** with these anchors:
+
+| Score | Meaning |
+|---|---|
+| **10** | Exemplary contribution — clear intent, good engineering hygiene |
+| **8**  | Solid — common case for legitimate PRs |
+| **6**  | Neutral / borderline |
+| **4**  | Significant slop markers — vague description, generic AI phrases, or one strong negative signal |
+| **2**  | Clear slop — a hard cap fired (AI-disclosure footer, drive-by overreach, sibling-repo mismatch, manipulative @-mention, AI-checklist theatre) |
+| **0**  | Pure boilerplate / wrong-target |
+
+The aggregator combines the two critic scores deterministically:
+
+- Weighted score = `0.4 × architecture_critic + 0.6 × slop_signals_critic`
+- **Score ≥ 5.0** → `approve` (not slop, maintainer reviews as normal)
+- **Score < 5.0** → `reject` (slop, flagged for the maintainer)
+- **Veto rule**: any critic ≤ **3** caps the overall score at **3** → automatic reject. One strong slop signal from either critic alone forces a slop verdict.
+
+Thresholds live in `src/pr_triage/aggregator.py` as `_SLOP_THRESHOLD`, `_VETO_THRESHOLD`, and `_VETO_CAP`. Critic weights live in `_DEFAULT_WEIGHTS`. The same legend is available in the eval viewer under the Disagreements section.
 
 ## Phase 2 deliverables
 
@@ -59,9 +96,9 @@ The gap is mainly Haiku's near-zero slop recall (0.077 vs 0.385 for Sonnet). A c
 | Phase | Status | Description |
 |-------|--------|-------------|
 | 1 | Done | Repo skeleton, GitHub ingestion, CLI |
-| 2 | Done | LangGraph critic pipeline, RAG, guidelines critic |
-| 3 | Done | Multi-critic pipeline, golden set, eval harness |
-| 4 | Planned | GitHub Action packaging |
+| 2 | Done | LangGraph critic pipeline, RAG, single guidelines critic |
+| 3 | Done | Binary slop classifier end-to-end (pipeline + prelabel + labeler + eval viewer + golden set + eval harness) |
+| 4 | Planned | GitHub Action packaging (action.yml, marketplace) |
 
 ## Usage
 
@@ -89,10 +126,10 @@ pr-triage --fake check owner/repo 42
 # Raise the token budget cap (default 50 000)
 pr-triage check owner/repo 42 --max-tokens 100000
 
-# Run eval against the golden set (Haiku, cheap)
+# Run eval against the golden set (Haiku, cheap iteration)
 pr-triage eval
 
-# Run eval with Sonnet critics (better recall, ~$3/run)
+# Run eval with Sonnet critics (production model, ~$1–2 for the full 53)
 pr-triage eval --model sonnet
 
 # Browse eval results in Streamlit
@@ -143,10 +180,11 @@ src/pr_triage/
 ├── labeler_app.py      # Streamlit manual labeling tool
 ├── eval_viewer_app.py  # Streamlit eval results viewer
 └── graph/
-    ├── nodes.py        # LangGraph node functions (3 critics + classify + aggregate)
+    ├── nodes.py        # LangGraph node functions (classify + 2 critics + aggregate)
     └── pipeline.py     # StateGraph assembly, run_pipeline(), budget pre-check
 tests/
 └── fixtures/
-    ├── golden/         # 53-entry golden set (JSON per PR)
-    └── llm/            # Recorded LLM response sequences for --fake mode
+    ├── golden/                            # 50-entry golden set (JSON per PR)
+    ├── golden_archive_post_hoc_only/      # 3 slop fixtures whose signals require post-hoc data
+    └── llm/                                # Recorded LLM response sequences for --fake mode
 ```
