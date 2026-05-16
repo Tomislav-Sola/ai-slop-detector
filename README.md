@@ -2,8 +2,6 @@
 
 A CLI tool (and planned GitHub Action) that flags AI-slop pull requests using a multi-critic LangGraph pipeline with RAG. Built to help OSS maintainers handle the surge of low-effort, AI-generated PRs.
 
-This is portfolio project #2, built in public.
-
 ## What this is
 
 Binary slop classifier for pull requests. `pr-triage check <owner/repo> <pr_number>` fetches a PR from GitHub, retrieves project context from a per-repo ChromaDB index, classifies the PR size, runs two critics in parallel (`architecture_critic`, `slop_signals_critic`), and emits one of two verdicts:
