@@ -56,8 +56,25 @@ def test_accepted_merged():
     c = _cand(merged=True)
     r = prelabel_candidate(c)
     assert r["label"] == "accepted"
+    assert r["is_slop_likely"] is False
     assert r["confidence"] == "high"
     assert r["signals"] == []
+
+
+def test_is_slop_likely_is_true_for_slop_label():
+    """The binary is_slop_likely must mirror label=='slop'."""
+    c = _cand(body="Generated with Claude Code — see https://claude.com/claude-code")
+    r = prelabel_candidate(c)
+    assert r["label"] == "slop"
+    assert r["is_slop_likely"] is True
+
+
+def test_is_slop_likely_false_for_rejected_quality():
+    """rejected_quality is not slop — binary must reflect that."""
+    c = _cand(issue_comments=[_maintainer_comment("could use more tests")])
+    r = prelabel_candidate(c)
+    assert r["label"] == "rejected_quality"
+    assert r["is_slop_likely"] is False
 
 
 def test_accepted_ignores_slop_signals_when_merged():

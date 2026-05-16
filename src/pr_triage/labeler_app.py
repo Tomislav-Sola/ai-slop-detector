@@ -2,6 +2,10 @@
 
 Launch via `pr-triage label` or directly:
     streamlit run src/pr_triage/labeler_app.py
+
+Binary slop labeling is the primary workflow: each PR is is_slop=True or False.
+A legacy 3-class refinement ("accepted" vs "rejected_quality" within not-slop) is
+kept for analysis but is optional — the binary classifier doesn't depend on it.
 """
 from __future__ import annotations
 
@@ -21,8 +25,8 @@ _SKIP_MAINTAINER = os.environ.get("LABELER_SKIP_MAINTAINER", "0") == "1"
 
 _CONF_RANK = {"unclear": 0, "low": 1, "medium": 2, "high": 3}
 
-# Pre-label → golden label (now 1:1 — canonical names match throughout)
-_PRE_TO_LABEL: dict[str, str] = {
+# Pre-label legacy 3-class → still used for queue ordering and suggestion.
+_PRE_TO_LEGACY: dict[str, str] = {
     "accepted": "accepted",
     "rejected_quality": "rejected_quality",
     "slop": "slop",
@@ -41,13 +45,20 @@ _MAINTAINER_PRIOR_PRS_THRESHOLD = 50
 # Data I/O
 # ------------------------------------------------------------------
 
-def _load_golden() -> dict[tuple[str, int], str]:
-    out: dict[tuple[str, int], str] = {}
+def _load_golden() -> dict[tuple[str, int], dict]:
+    """Return labelled entries keyed by (repo, pr_number). Each value carries
+    is_slop and the legacy label, so we can recompute counts both ways."""
+    out: dict[tuple[str, int], dict] = {}
     if _GOLDEN_PATH.exists():
         for line in _GOLDEN_PATH.read_text().splitlines():
             if line.strip():
                 e = json.loads(line)
-                out[(e["repo"], e["pr_number"])] = e["label"]
+                key = (e["repo"], e["pr_number"])
+                label = e.get("label", "")
+                out[key] = {
+                    "label": label,
+                    "is_slop": e.get("is_slop", label == "slop"),
+                }
     return out
 
 
@@ -70,7 +81,13 @@ def _count_labels() -> dict[str, int]:
 
 def _save_label(repo: str, pr_number: int, label: str, notes: str = "") -> None:
     _GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    entry: dict[str, Any] = {"repo": repo, "pr_number": pr_number, "label": label}
+    is_slop = label == "slop"
+    entry: dict[str, Any] = {
+        "repo": repo,
+        "pr_number": pr_number,
+        "label": label,        # legacy 3-class for backward compat
+        "is_slop": is_slop,    # binary primary
+    }
     if notes:
         entry["notes"] = notes
     with _GOLDEN_PATH.open("a") as f:
@@ -133,8 +150,6 @@ _MAINTAINER_ASSOC = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 def _is_maintainer_cleanup(candidate: dict) -> bool:
     prior = candidate.get("author_prior_prs_in_repo")
     assoc = candidate.get("author_association")
-    # Primary: explicit org role. Fallback: high prior-PR count for repos that
-    # don't return association data or for prolific non-member contributors.
     is_maintainer = (assoc in _MAINTAINER_ASSOC) or (
         prior is not None and prior >= _MAINTAINER_PRIOR_PRS_THRESHOLD
     )
@@ -147,19 +162,17 @@ def _is_maintainer_cleanup(candidate: dict) -> bool:
 
 
 def _auto_skip_maintainer_cleanups(
-    queue: list[dict], labeled: dict[tuple[str, int], str]
+    queue: list[dict], labeled: dict[tuple[str, int], dict]
 ) -> tuple[list[dict], int]:
     remaining: list[dict] = []
     auto_skipped = 0
     for entry in queue:
         candidate = _load_candidate(entry)
-        # Never auto-skip slop-flagged PRs — a high-prior-prs author triggering a slop
-        # signal is either a critical false positive or a maintainer mistake; both are
-        # eval-relevant calibration cases that need manual review.
+        # Never auto-skip slop-flagged PRs.
         if _is_maintainer_cleanup(candidate) and entry["label"] != "slop":
             key = (entry["repo"], entry["pr_number"])
             _save_label(entry["repo"], entry["pr_number"], "skip", "maintainer_cleanup_auto_skip")
-            labeled[key] = "skip"
+            labeled[key] = {"label": "skip", "is_slop": False}
             auto_skipped += 1
         else:
             remaining.append(entry)
@@ -208,7 +221,7 @@ def _init() -> None:
 
 def _do_label(repo: str, pr_number: int, label: str, notes: str = "") -> None:
     _save_label(repo, pr_number, label, notes)
-    st.session_state.labeled[(repo, pr_number)] = label
+    st.session_state.labeled[(repo, pr_number)] = {"label": label, "is_slop": label == "slop"}
     if label in st.session_state.counts:
         st.session_state.counts[label] += 1
     st.session_state.idx += 1
@@ -220,7 +233,7 @@ def _do_skip(notes: str = "") -> None:
     i = st.session_state.idx
     entry = q[i]
     _save_label(entry["repo"], entry["pr_number"], "skip", notes)
-    st.session_state.labeled[(entry["repo"], entry["pr_number"])] = "skip"
+    st.session_state.labeled[(entry["repo"], entry["pr_number"])] = {"label": "skip", "is_slop": False}
     st.session_state.counts["skip"] += 1
     st.session_state.idx += 1
     st.session_state.disk_writes += 1
@@ -242,7 +255,8 @@ def _keyboard_js() -> None:
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         const map = {
             'a': 'Accept suggestion',
-            'r': 'slop',
+            'n': 'Not slop',
+            'r': 'Slop',
             's': 'Skip',
         };
         const needle = map[e.key.toLowerCase()];
@@ -295,19 +309,24 @@ def _render_comments(candidate: dict) -> None:
 
 
 def _prelabel_badge(pre_label: str, confidence: str) -> str:
-    icons = {"accepted": "🟢", "rejected_quality": "🟠", "slop": "🔴", "unclear": "🟡"}
-    icon = icons.get(pre_label, "⚪")
+    is_slop_pred = pre_label == "slop"
+    binary_icon = "🗑️" if is_slop_pred else ("🟡" if pre_label == "unclear" else "✅")
+    binary_text = "is_slop = **True**" if is_slop_pred else (
+        "is_slop = ? (unclear)" if pre_label == "unclear" else "is_slop = **False**"
+    )
+    legacy_icon = {"accepted": "🟢", "rejected_quality": "🟠", "slop": "🔴", "unclear": "🟡"}.get(pre_label, "⚪")
     if pre_label == "unclear":
-        return f"{icon} **unclear** — no confident signal"
-    return f"{icon} **{pre_label}** ({confidence} confidence)"
+        return f"{binary_icon} {binary_text} — no confident signal"
+    return f"{binary_icon} {binary_text}  ·  legacy hint: {legacy_icon} {pre_label} ({confidence})"
 
 
 def _progress_text(idx: int, total: int, counts: dict) -> str:
     c = counts
+    n_slop = c["slop"]
+    n_not_slop = c["accepted"] + c["rejected_quality"]
     return (
-        f"PR {idx + 1}/{total} in queue  |  labeled so far: "
-        f"slop={c['slop']}  rejected_quality={c['rejected_quality']}  "
-        f"accepted={c['accepted']}  skip={c['skip']}"
+        f"PR {idx + 1}/{total} in queue  |  labeled: "
+        f"is_slop=True: {n_slop}  ·  is_slop=False: {n_not_slop}  ·  skip: {c['skip']}"
     )
 
 
@@ -329,16 +348,18 @@ st.info(st.session_state.startup_msg)
 st.caption(f"Persisted to disk: {st.session_state.disk_writes} labels  ·  Output: `{_GOLDEN_PATH}`")
 
 if auto_skipped:
-    st.info(f"Auto-skipped {auto_skipped} maintainer cleanup PRs (prior_prs ≥ {_MAINTAINER_PRIOR_PRS_THRESHOLD}, no comments, unmerged). Written as 'skip' to output.")
+    st.info(f"Auto-skipped {auto_skipped} maintainer cleanup PRs. Written as 'skip' to output.")
 
 # Done screen
 if idx >= total:
-    st.success(f"Queue complete — {sum(c for k, c in counts.items() if k != 'skip')} PRs labeled (plus {counts['skip']} skipped).")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("✅ accepted", counts["accepted"])
-    c2.metric("🔄 rejected_quality", counts["rejected_quality"])
-    c3.metric("🗑️ slop", counts["slop"])
-    c4.metric("⏭️ skip", counts["skip"])
+    n_slop = counts["slop"]
+    n_not_slop = counts["accepted"] + counts["rejected_quality"]
+    st.success(f"Queue complete — labeled {n_slop + n_not_slop} PRs ({counts['skip']} skipped).")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🗑️ is_slop=True", n_slop)
+    c2.metric("✅ is_slop=False", n_not_slop,
+              help=f"{counts['accepted']} accepted + {counts['rejected_quality']} rejected_quality (legacy refinement)")
+    c3.metric("⏭️ skip", counts["skip"])
     st.info("Run `pr-triage golden-build` to write the golden fixtures.")
     if st.button("Restart (re-review skipped PRs)"):
         del st.session_state["initialized"]
@@ -351,7 +372,8 @@ pr_number = entry["pr_number"]
 pre_label = entry["label"]
 confidence = entry.get("confidence", "low")
 signals = entry.get("signals", [])
-suggested_label = _PRE_TO_LABEL.get(pre_label)
+suggested_label = _PRE_TO_LEGACY.get(pre_label)
+suggested_is_slop = pre_label == "slop"
 
 candidate = _load_candidate(entry)
 
@@ -416,7 +438,7 @@ with right:
         for sig in signals:
             st.markdown(f"- {_SIGNAL_LABELS.get(sig, sig)}")
     else:
-        st.caption("No slop signals.")
+        st.caption("No slop signals detected.")
 
     st.divider()
 
@@ -426,32 +448,46 @@ with right:
         placeholder="reason for override, edge case…",
     )
 
-    st.markdown("**Actions** · `a` accept · `r` slop · `s` skip")
+    st.markdown("**Actions** · `a` accept · `r` Slop · `n` Not slop · `s` skip")
 
     if suggested_label:
-        emoji = _LABEL_EMOJI.get(suggested_label, "")
+        emoji = "🗑️" if suggested_is_slop else "✅"
+        verdict = "Slop" if suggested_is_slop else "Not slop"
         if st.button(
-            f"Accept suggestion  →  {emoji} {suggested_label}",
+            f"Accept suggestion  →  {emoji} {verdict}  (legacy: {suggested_label})",
             type="primary",
             use_container_width=True,
         ):
             _do_label(repo, pr_number, suggested_label, notes)
             st.rerun()
 
-    st.markdown("**Override:**")
-    ov1, ov2, ov3 = st.columns(3)
-    with ov1:
-        if st.button("✅ accepted", use_container_width=True, key="btn_accepted"):
-            _do_label(repo, pr_number, "accepted", notes)
-            st.rerun()
-    with ov2:
-        if st.button("🔄 rejected_quality", use_container_width=True, key="btn_rq"):
-            _do_label(repo, pr_number, "rejected_quality", notes)
-            st.rerun()
-    with ov3:
-        if st.button("🗑️ slop", use_container_width=True, key="btn_slop"):
+    st.markdown("**Manual labeling — primary binary verdict:**")
+    bv1, bv2 = st.columns(2)
+    with bv1:
+        if st.button("🗑️ Slop", use_container_width=True, key="btn_slop"):
             _do_label(repo, pr_number, "slop", notes)
             st.rerun()
+    with bv2:
+        if st.button("✅ Not slop", use_container_width=True, key="btn_not_slop",
+                     help="Records as is_slop=False, legacy label 'accepted'. Use the refinement below to mark rejected_quality instead."):
+            _do_label(repo, pr_number, "accepted", notes)
+            st.rerun()
+
+    with st.expander("Legacy 3-class refinement (optional)"):
+        st.caption(
+            "Not required for the binary classifier. Useful only for offline analysis "
+            "of why a not-slop PR was rejected (design disagreement vs accepted)."
+        )
+        rf1, rf2 = st.columns(2)
+        with rf1:
+            if st.button("✅ accepted (will-merge-like)", use_container_width=True, key="btn_accepted"):
+                _do_label(repo, pr_number, "accepted", notes)
+                st.rerun()
+        with rf2:
+            if st.button("🔄 rejected_quality", use_container_width=True, key="btn_rq",
+                         help="Not slop, but maintainer rejected for design/scope reasons."):
+                _do_label(repo, pr_number, "rejected_quality", notes)
+                st.rerun()
 
     st.divider()
 
@@ -459,11 +495,15 @@ with right:
         _do_skip(notes)
         st.rerun()
 
-# Footer — running counts vs targets
+# Footer — binary primary; legacy 3-class as detail.
 st.divider()
-f1, f2, f3, f4, f5 = st.columns(5)
-f1.metric("✅ accepted", counts["accepted"], delta=f"target 20, {max(20 - counts['accepted'], 0)} left")
-f2.metric("🔄 rejected_quality", counts["rejected_quality"], delta=f"target 20, {max(20 - counts['rejected_quality'], 0)} left")
-f3.metric("🗑️ slop", counts["slop"], delta=f"target 10, {max(10 - counts['slop'], 0)} left")
-f4.metric("⏭️ skip", counts["skip"])
-f5.metric("Queue remaining", total - idx)
+n_slop = counts["slop"]
+n_not_slop = counts["accepted"] + counts["rejected_quality"]
+f1, f2, f3, f4 = st.columns(4)
+f1.metric("🗑️ is_slop=True", n_slop,
+          delta=f"target 10, {max(10 - n_slop, 0)} left")
+f2.metric("✅ is_slop=False", n_not_slop,
+          delta=f"target 40, {max(40 - n_not_slop, 0)} left",
+          help=f"{counts['accepted']} accepted + {counts['rejected_quality']} rejected_quality")
+f3.metric("⏭️ skip", counts["skip"])
+f4.metric("Queue remaining", total - idx)

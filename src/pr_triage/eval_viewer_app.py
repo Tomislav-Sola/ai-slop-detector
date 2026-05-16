@@ -1,13 +1,11 @@
-"""Streamlit eval viewer — pr-triage view (Phase 3 / B6).
+"""Streamlit eval viewer — pr-triage view.
 
 Launch via:  pr-triage view  [--run path/to/run.json]
 
-Shows:
-  - Summary metrics (accuracy, per-class precision/recall/F1)
-  - Confusion matrix heatmap
-  - Per-critic score distributions (box plots)
-  - Disagrement table: cases where predicted != golden label
-  - Expandable diff / findings for each disagreement
+Binary slop classifier view: summary metrics on the slop class (precision,
+recall, F1), 2x2 confusion matrix, per-critic score distributions, and a
+disagreements table where the model's verdict differed from the golden
+is_slop label. The legacy 3-class `golden_label` is shown as auxiliary context.
 """
 from __future__ import annotations
 
@@ -41,156 +39,170 @@ run = json.loads(run_path.read_text())
 m = run["metrics"]
 results = run["results"]
 
+
+def _result_is_slop(r: dict) -> bool:
+    """Read is_slop from a result row; fall back to deriving from legacy golden_label."""
+    if "is_slop" in r:
+        return bool(r["is_slop"])
+    return r.get("golden_label") == "slop"
+
+
 st.caption(
     f"Run: {run['run_at']}  |  Golden dir: {run['golden_dir']}  |  "
     f"Entries: {run['n_entries']}  |  File: {run_path.name}"
 )
 if run.get("ablation_critic"):
     st.info(f"Ablation: **{run['ablation_critic']}** excluded from aggregation")
+if run.get("archived_post_hoc_only"):
+    archived = ", ".join(run["archived_post_hoc_only"])
+    st.caption(f"Note: post-hoc-only slop fixtures archived from this run: {archived}")
 
 
 # ------------------------------------------------------------------
-# Summary metrics
+# Summary metrics — slop class is the focus
 # ------------------------------------------------------------------
 
-st.header("Summary")
+st.header("Summary — slop detection")
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Accuracy", f"{m['accuracy']:.1%}")
-col2.metric("Entries", m["n_total"])
-col3.metric("Correct", m["n_correct"])
-col4.metric("Errors", sum(1 for r in results if "error" in r))
+col1.metric("Slop precision", f"{m.get('slop_precision', 0):.3f}")
+col2.metric("Slop recall", f"{m.get('slop_recall', 0):.3f}")
+col3.metric("Slop F1", f"{m.get('slop_f1', 0):.3f}")
+col4.metric("Accuracy", f"{m.get('accuracy', 0):.1%}")
 
-st.subheader("Per-class metrics")
+col5, col6, col7, col8 = st.columns(4)
+col5.metric("TP (correct slop)", m.get("tp", 0))
+col6.metric("FP (false alarms)", m.get("fp", 0))
+col7.metric("FN (missed slop)", m.get("fn", 0))
+col8.metric("TN (correct approve)", m.get("tn", 0))
+
+errored = [r for r in results if r.get("error")]
+if errored:
+    with st.expander(f"⚠️  {len(errored)} PR(s) could not be evaluated — defaulted to approve"):
+        st.caption(
+            "These PRs did not produce a model verdict. The safe default is approve "
+            "(no automated slop flag) so a maintainer is not surprised by an "
+            "unjustified label. Common causes: pre-flight token-budget cap on very "
+            "large diffs, transient API errors, malformed JSON output."
+        )
+        for r in errored:
+            st.write(
+                f"- **{r['repo']} #{r['pr_number']}** "
+                f"(is_slop={r.get('is_slop', '?')}, legacy={r.get('golden_label', '?')}): "
+                f"`{r.get('error', '')[:200]}`"
+            )
+
 import pandas as pd
 
-pc = m["per_class"]
-rows = []
-for cls in ["approve", "request_changes", "reject"]:
-    s = pc.get(cls, {})
-    rows.append({
-        "Class": cls,
-        "Precision": f"{s.get('precision', 0):.3f}",
-        "Recall": f"{s.get('recall', 0):.3f}",
-        "F1": f"{s.get('f1', 0):.3f}",
-        "TP": s.get("tp", 0),
-        "FP": s.get("fp", 0),
-        "FN": s.get("fn", 0),
-    })
-st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
 
 # ------------------------------------------------------------------
-# Confusion matrix
+# Binary confusion matrix
 # ------------------------------------------------------------------
 
-st.subheader("Confusion matrix")
-decisions = ["approve", "request_changes", "reject"]
+st.subheader("Binary confusion matrix")
+decisions = ["approve", "reject"]
 cm = m.get("confusion_matrix", {})
 cm_rows = []
 for true_cls in decisions:
-    row = {"True \\ Predicted": true_cls}
+    row = {"True is_slop \\ Predicted": ("slop" if true_cls == "reject" else "not-slop")}
     for pred_cls in decisions:
-        row[pred_cls] = cm.get(true_cls, {}).get(pred_cls, 0)
-    cm_rows.append(row)
-cm_df = pd.DataFrame(cm_rows).set_index("True \\ Predicted")
-st.dataframe(cm_df.style.background_gradient(cmap="Blues"), use_container_width=True)
-
-
-# ------------------------------------------------------------------
-# Per-critic score distributions
-# ------------------------------------------------------------------
-
-st.subheader("Per-critic scores")
-all_scores: dict[str, list[int]] = {}
-for r in results:
-    for critic, score in (r.get("per_critic_scores") or {}).items():
-        all_scores.setdefault(critic, []).append(score)
-
-if all_scores:
-    score_rows = []
-    for critic, scores in sorted(all_scores.items()):
-        avg = sum(scores) / len(scores)
-        score_rows.append({
-            "Critic": critic,
-            "N": len(scores),
-            "Mean": f"{avg:.1f}",
-            "Min": min(scores),
-            "Max": max(scores),
-        })
-    st.dataframe(pd.DataFrame(score_rows), use_container_width=True, hide_index=True)
-
-    try:
-        import altair as alt
-        flat = [
-            {"critic": critic, "score": s}
-            for critic, scores in all_scores.items()
-            for s in scores
-        ]
-        chart = (
-            alt.Chart(pd.DataFrame(flat))
-            .mark_boxplot()
-            .encode(x="critic:N", y=alt.Y("score:Q", scale=alt.Scale(domain=[0, 10])))
-            .properties(height=300)
+        row[("slop" if pred_cls == "reject" else "not-slop")] = (
+            cm.get(true_cls, {}).get(pred_cls, 0)
         )
-        st.altair_chart(chart, use_container_width=True)
-    except Exception:
-        pass  # altair optional
-else:
-    st.info("No per-critic scores available in this run.")
+    cm_rows.append(row)
+cm_df = pd.DataFrame(cm_rows).set_index("True is_slop \\ Predicted")
+st.dataframe(cm_df, use_container_width=True)
 
 
 # ------------------------------------------------------------------
-# Disagreements
+# Disagreements — split into false positives (worse for trust) and false negatives.
 # ------------------------------------------------------------------
 
-_LABEL_TO_DECISION = {
-    "accepted": "approve",
-    "rejected_quality": "request_changes",
-    "slop": "reject",
-}
+def _expected_decision(r: dict) -> str:
+    return "reject" if _result_is_slop(r) else "approve"
 
-disagreements = [
-    r for r in results
-    if _LABEL_TO_DECISION.get(r.get("golden_label", "")) != r.get("predicted_decision")
-]
 
-st.header(f"Disagreements ({len(disagreements)} / {len(results)})")
+false_positives = [r for r in results if _expected_decision(r) == "approve" and r.get("predicted_decision") == "reject"]
+false_negatives = [r for r in results if _expected_decision(r) == "reject" and r.get("predicted_decision") == "approve"]
 
-if not disagreements:
-    st.success("Perfect agreement on all entries!")
-else:
-    golden_dir = Path(run.get("golden_dir", "tests/fixtures/golden"))
+st.header(f"Disagreements — {len(false_positives)} FP + {len(false_negatives)} FN")
 
-    for r in disagreements:
-        true_dec = _LABEL_TO_DECISION.get(r.get("golden_label", ""), "?")
-        pred_dec = r.get("predicted_decision", "?")
-        label = f"{r['repo']} #{r['pr_number']}  |  Golden: **{r['golden_label']}** → {true_dec}  |  Predicted: **{pred_dec}**"
-        with st.expander(label):
-            safe = r["repo"].replace("/", "__")
-            fixture_path = golden_dir / f"{safe}_pr{r['pr_number']}.json"
-            if fixture_path.exists():
-                entry = json.loads(fixture_path.read_text())
-                st.write(f"**{entry.get('title', '')}**")
-                st.caption(
-                    f"author={entry.get('author')}  |  "
-                    f"assoc={entry.get('author_association')}  |  "
-                    f"+{entry.get('additions', 0)}/-{entry.get('deletions', 0)}  |  "
-                    f"merged={entry.get('merged')}"
-                )
-                if entry.get("label_notes"):
-                    st.info(f"Label notes: {entry['label_notes']}")
+with st.expander("Score legend"):
+    st.markdown(
+        """
+**Critic scores (0–10, per critic):**
 
-                scores = r.get("per_critic_scores", {})
-                if scores:
-                    st.write("**Critic scores:**", scores)
+| Score | Meaning |
+|---|---|
+| **10** | Exemplary contribution — clear intent, good engineering hygiene |
+| **8** | Solid — common case for legitimate PRs |
+| **6** | Neutral / borderline |
+| **4** | Significant slop markers — vague description, generic AI phrases, or one strong negative signal |
+| **2** | Clear slop — a hard cap fired (AI-disclosure footer, drive-by overreach, sibling-repo mismatch, manipulative @-mention, AI-checklist theatre) |
+| **0** | Pure boilerplate / wrong-target |
 
-                diff = entry.get("raw_diff", "")
-                if diff:
-                    with st.expander("Diff (first 200 lines)"):
-                        lines = diff.splitlines()[:200]
-                        st.code("\n".join(lines), language="diff")
-            else:
-                st.warning("Fixture file not found locally.")
-            if r.get("error"):
-                st.error(f"Pipeline error: {r['error']}")
+**Aggregator decision:**
+- Weighted score = `0.4 × architecture_critic + 0.6 × slop_signals_critic`
+- **Score ≥ 5.0** → `approve` (not slop)
+- **Score < 5.0** → `reject` (slop)
+- **Veto rule:** any critic ≤ **3** caps the overall score at **3** → automatic reject. One strong slop signal from either critic alone forces a slop verdict.
+        """
+    )
+
+if not false_positives and not false_negatives:
+    st.success("Perfect agreement on all entries.")
+
+
+golden_dir = Path(run.get("golden_dir", "tests/fixtures/golden"))
+
+
+def _render_entry(r: dict, kind: str) -> None:
+    gold_label = r.get("golden_label", "?")
+    pred = r.get("predicted_decision", "?")
+    is_slop = _result_is_slop(r)
+    header = (
+        f"{r['repo']} #{r['pr_number']}  |  "
+        f"is_slop=**{is_slop}** (legacy: {gold_label})  |  "
+        f"Predicted: **{pred}**"
+    )
+    with st.expander(header):
+        safe = r["repo"].replace("/", "__")
+        fixture_path = golden_dir / f"{safe}_pr{r['pr_number']}.json"
+        if fixture_path.exists():
+            entry = json.loads(fixture_path.read_text())
+            st.write(f"**{entry.get('title', '')}**")
+            st.caption(
+                f"author={entry.get('author')}  |  "
+                f"assoc={entry.get('author_association')}  |  "
+                f"prior_prs={entry.get('author_prior_prs_in_repo')}  |  "
+                f"+{entry.get('additions', 0)}/-{entry.get('deletions', 0)}"
+            )
+            if entry.get("label_notes"):
+                st.info(f"Label notes: {entry['label_notes']}")
+
+            scores = r.get("per_critic_scores", {})
+            if scores:
+                st.write("**Critic scores:**", scores)
+
+            diff = entry.get("raw_diff", "")
+            if diff:
+                with st.expander("Diff (first 200 lines)"):
+                    lines = diff.splitlines()[:200]
+                    st.code("\n".join(lines), language="diff")
+        else:
+            st.warning(f"Fixture file not found locally at {fixture_path}.")
+        if r.get("error"):
+            st.error(f"Pipeline error: {r['error']}")
+
+
+if false_positives:
+    st.subheader(f"False positives — not-slop PRs flagged as slop ({len(false_positives)})")
+    st.caption("These hurt user trust the most. Investigate the critic scores and label_notes to understand the model's reasoning.")
+    for r in false_positives:
+        _render_entry(r, "fp")
+
+if false_negatives:
+    st.subheader(f"False negatives — slop PRs missed ({len(false_negatives)})")
+    st.caption("Each represents slop reaching the maintainer without a warning label.")
+    for r in false_negatives:
+        _render_entry(r, "fn")
