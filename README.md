@@ -18,13 +18,13 @@ The Action is designed to fire **once** per PR at `on: pull_request: [opened, re
 
 ## Phase 3 deliverables
 
-- **50-entry golden set** — 10 slop, 40 not-slop, spanning 8 repos (ruff, pydantic, poetry, godot, Home Assistant, ghostty, curl, tldraw). `is_slop: bool` is the primary label; the original 3-class `golden_label` is kept as auxiliary metadata for analysis. Three additional fixtures whose slop signals are only available post-hoc (timing, coverage report, external knowledge) live under `tests/fixtures/golden_archive_post_hoc_only/` for use by any future re-triage mode.
+- **50-entry golden set** — 10 slop, 40 not-slop, spanning 8 repos (ruff, pydantic, poetry, godot, Home Assistant, ghostty, curl, tldraw). `is_slop: bool` is the label on every fixture.
 - **Two critics in parallel** — `architecture_critic` (over-engineering, AI-explanatory docstrings, wrong-arch-layer) + `slop_signals_critic` (AI footer, drive-by overreach, manipulative @-mention, AI-checklist theatre, sibling-repo mismatch, heuristic features). LangGraph fan-out/fan-in with `operator.add` reducer.
 - **Deterministic binary aggregator** — weighted score (slop 0.6, arch 0.4), veto rule (any critic ≤ 3 caps overall at 3), single `_SLOP_THRESHOLD = 5.0`. Output: `approve` or `reject`.
 - **`pr-triage eval`** — runs the pipeline against the golden set, emits binary precision/recall/F1 on the slop class plus a per-golden-class breakdown.
 - **`pr-triage view`** — Streamlit eval viewer. Shows slop precision/recall/F1, binary confusion matrix, and a disagreements table split into false positives and false negatives.
-- **`pr-triage label`** — Streamlit manual labeling tool. Primary verdict is binary (Slop / Not slop); the legacy 3-class refinement is available in a collapsible section for offline analysis only.
-- **`pr-triage prelabel` / `harvest`** — automated harvest and heuristic pre-labeling pipeline. `prelabel` emits `is_slop_likely: bool` as the primary output alongside the legacy 3-class hint.
+- **`pr-triage label`** — Streamlit manual labeling tool. Binary verdict: 🗑️ Slop or ✅ Not slop. Output writes `{"repo", "pr_number", "is_slop"}` to `data/golden_labels.jsonl`.
+- **`pr-triage prelabel` / `harvest`** — automated harvest and heuristic pre-labeling pipeline. `prelabel` emits `{is_slop_likely, confidence, signals}` for each candidate.
 - **`pr-triage golden-build`** — CLI builder; validates min slop / not-slop counts; writes `is_slop` into every fixture.
 - **Dollar cost guardrail** — `MAX_EVAL_COST_USD` in `.env` stops the eval loop before it exceeds budget.
 - **Cost tracking** — `ClaudeClient.total_cost_usd`; printed after every eval run.
@@ -39,15 +39,7 @@ The Action is designed to fire **once** per PR at `on: pull_request: [opened, re
 | Accuracy | 92.0% (46/50) |
 | Cost per PR | ~$0.025–0.035 |
 
-**Zero false positives on accepted PRs (20/20 correct).** The 4 false positives are all `rejected_quality` PRs whose diffs carry slop-adjacent content signals (over-engineered patches, AI-style docstrings, drive-by overreach). The labeler called them RQ for design reasons not visible in the diff; the model can't see the design reasons but does see the slop-style content. In production those FPs still surface PRs worth a closer look — they're not arbitrary noise.
-
-Breakdown by legacy 3-class label:
-
-| Golden | n | Predicted approve | Predicted reject |
-|---|---|---|---|
-| accepted | 20 | **20 ✓** | 0 |
-| rejected_quality | 20 | 16 | 4 (slop-adjacent content) |
-| slop | 10 | 0 | **10 ✓** |
+**All 10 slop PRs are caught with no false positives on clearly-accepted PRs.** The 4 false positives are on `is_slop=False` entries whose diffs carry slop-adjacent content (over-engineered patches, AI-style docstrings, drive-by overreach). The model can't see the maintainer's design reasoning but does see the slop-style content — so these FPs still surface PRs worth a closer look, not arbitrary noise.
 
 ## How scoring works
 
@@ -187,7 +179,6 @@ src/pr_triage/
     └── pipeline.py     # StateGraph assembly, run_pipeline(), budget pre-check
 tests/
 └── fixtures/
-    ├── golden/                            # 50-entry golden set (JSON per PR)
-    ├── golden_archive_post_hoc_only/      # 3 slop fixtures whose signals require post-hoc data
+    ├── golden/                            # 50-entry golden set (JSON per PR, is_slop labels)
     └── llm/                                # Recorded LLM response sequences for --fake mode
 ```

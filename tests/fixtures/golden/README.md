@@ -1,7 +1,7 @@
 # Golden Set — Methodology
 
-This directory contains the Phase 3 golden test fixtures used by the eval harness.
-Each `.json` file is a PR candidate annotated with `golden_label` and `label_notes`.
+This directory contains the golden test fixtures used by the eval harness.
+Each `.json` file is a PR candidate annotated with `is_slop: bool`.
 `manifest.json` is generated automatically by `pr-triage golden-build`.
 
 ## Construction pipeline
@@ -17,50 +17,41 @@ pr-triage golden-build         →  tests/fixtures/golden/
 
 | Metric | Value |
 |--------|-------|
-| Total entries | 53 |
-| accepted | 20 |
-| rejected_quality | 20 |
-| slop | 13 |
+| Total entries | 50 |
+| is_slop=True | 10 |
+| is_slop=False | 40 |
 | Distinct repos | 8 |
 
 ### Per-repo breakdown
 
 | Repo | Entries |
 |------|---------|
-| pydantic/pydantic | 13 |
+| pydantic/pydantic | 11 |
 | astral-sh/ruff | 9 |
 | python-poetry/poetry | 7 |
-| godotengine/godot | 6 |
 | home-assistant/core | 6 |
+| godotengine/godot | 6 |
 | ghostty-org/ghostty | 5 |
-| curl/curl | 5 |
+| curl/curl | 4 |
 | tldraw/tldraw | 2 |
 
 ## Label definitions
 
-### accepted
-
-PR was merged with no revert within 14 days. Covers first-time-contributor
-bug fixes through founder/member architectural work. Internal-team chore PRs
-are included for repos with closed external-contributor policies (tldraw).
-
-### rejected_quality
-
-PR was closed unmerged for code/design quality, scope, or architectural
-disagreement — **not** because of AI slop signals.
-
-Sub-patterns represented: maintainer design rejection, superseded by maintainer
-alternative, policy rejection (wrong submission channel), collaborative iteration
-that ultimately diverged, trusted-contributor design pushback.
-
-### slop
+### is_slop = True
 
 PR was closed with explicit or implicit evidence of low-effort or
 AI-assisted generation without meaningful human validation.
 
-Sub-patterns represented: explicit AI policy rejection, 58-second closure smoking
-gun, silent slop (first-timer / no comments / AI footer), bot-spam recidivism,
-corporate-vendor astroturfing, fabricated tool name in security report.
+Sub-patterns represented: explicit AI policy rejection, silent slop
+(first-timer / no comments / AI footer), bot-spam recidivism,
+corporate-vendor astroturfing.
+
+### is_slop = False
+
+Everything else — merged PRs *and* closed-unmerged PRs that were rejected
+for code/design quality, scope, or architectural disagreement rather than
+AI-slop signals. The Action's job is to flag slop only; maintainers review
+the rest as normal.
 
 ## Methodological choices
 
@@ -74,9 +65,9 @@ Only `state=closed` PRs (merged or unmerged). Open PRs have no decided outcome.
 
 ### Human-in-the-loop labeling
 
-No entry is labeled without human review. The prelabeler suggests a label and
-confidence; the final label is always written by a human via the Streamlit tool.
-This avoids the methodological circularity of auto-labeling eval data.
+No entry is labeled without human review. The prelabeler suggests
+`is_slop_likely` and confidence; the final binary `is_slop` is always
+written by a human via the Streamlit tool.
 
 ### Diversity constraints
 
@@ -89,9 +80,8 @@ per-(author, repo) limits so no single prolific contributor dominates.
 - 8 repos is a small sample — results will not generalise to embedded,
   ML-pipeline, or domain-specific projects
 - Labels reflect a single labeler's judgment as ground truth
-- slop is over-represented (13 vs target 10) because slop is easier to
-  identify with high confidence than borderline rejected_quality cases
-- tldraw has only 2 entries because the repo rejects all external contributors
+- The slop class is over-represented relative to real-world repos — most
+  OSS repos see slop at well below 20% of PR volume
 
 ## How to extend
 
