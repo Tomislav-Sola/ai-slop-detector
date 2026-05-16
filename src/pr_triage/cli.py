@@ -337,7 +337,7 @@ def eval(
     ablation: str = typer.Option("", "--ablation", help="Critic name to exclude (e.g. slop_signals_critic)."),
     limit: int = typer.Option(0, "--limit", help="Max entries to evaluate (0 = all)."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
-    model: str = typer.Option("haiku", "--model", help="Model for critics: 'haiku' (default, cheap) or 'sonnet' (production quality)."),
+    model: str = typer.Option("sonnet", "--model", help="Model for critics: 'sonnet' (default, production quality) or 'haiku' (cheap iteration)."),
 ) -> None:
     """Run the eval harness against the golden test set and print metrics."""
     from pr_triage.claude_client import MODEL_HAIKU, MODEL_SONNET

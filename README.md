@@ -129,11 +129,11 @@ pr-triage --fake check owner/repo 42
 # Raise the token budget cap (default 50 000)
 pr-triage check owner/repo 42 --max-tokens 100000
 
-# Run eval against the golden set (Haiku, cheap iteration)
+# Run eval against the golden set (Sonnet, ~$1.50 for the full 50 — production-quality)
 pr-triage eval
 
-# Run eval with Sonnet critics (production model, ~$1.50 for the full 50)
-pr-triage eval --model sonnet
+# Cheap iteration with Haiku (~$0.30) — for fast feedback during prompt tweaks
+pr-triage eval --model haiku
 
 # Browse eval results in Streamlit
 pr-triage view outputs/eval_runs/<run_id>.json

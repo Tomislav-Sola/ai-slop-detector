@@ -54,7 +54,7 @@ src/pr_triage/
 - `classify_size` → Haiku (always — simple classification)
 - `architecture_critic` → Sonnet (production default)
 - `slop_signals_critic` → Sonnet (production default; Haiku reject recall collapsed to 0.077 in earlier eval)
-- `pr-triage eval` → critics default to Haiku for cheap iteration; use `--model sonnet` for production-quality check
+- `pr-triage eval` → critics default to Sonnet (matches production); use `--model haiku` for cheap iteration during prompt tweaks
 
 ## Phase status
 

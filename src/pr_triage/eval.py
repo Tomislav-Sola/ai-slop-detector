@@ -186,11 +186,12 @@ def run_eval(
     """Run the full eval loop and return the run summary dict.
 
     Requires ANTHROPIC_API_KEY in the environment (real LLM calls).
-    critic_model overrides the model used for all three critic nodes.
-    Defaults to MODEL_HAIKU to keep eval costs low.
+    critic_model overrides the model used for both critic nodes.
+    Defaults to MODEL_SONNET so the headline numbers match the production model
+    used by the GitHub Action. Pass MODEL_HAIKU for cheap iteration.
     """
     from pr_triage.aggregator import aggregate
-    from pr_triage.claude_client import MODEL_HAIKU, ClaudeClient
+    from pr_triage.claude_client import MODEL_SONNET, ClaudeClient
     from pr_triage.graph.pipeline import run_pipeline
     from pr_triage.rag import RAGIndex
 
@@ -198,7 +199,7 @@ def run_eval(
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
 
-    effective_model = critic_model or MODEL_HAIKU
+    effective_model = critic_model or MODEL_SONNET
     claude = ClaudeClient(api_key=api_key)
     rag = RAGIndex()
 
