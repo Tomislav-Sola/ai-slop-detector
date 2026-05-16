@@ -246,7 +246,7 @@ def prelabel(
 
 @app.command(name="golden-build")
 def golden_build(
-    labels_path: Path = typer.Option(Path("data/golden_labels.jsonl"), "--labels", help="Manual labels JSONL (repo, pr_number, label, notes?)."),
+    labels_path: Path = typer.Option(Path("data/golden_labels.jsonl"), "--labels", help="Manual labels JSONL (repo, pr_number, is_slop, notes?)."),
     candidates_dirs_csv: str = typer.Option(
         "data/golden_candidates_v2,data/candidates",
         "--candidates-dirs",
@@ -273,10 +273,7 @@ def golden_build(
     typer.echo(
         f"Golden set written to {out_dir}: "
         f"{summary['total']} total — "
-        f"is_slop=True: {summary['is_slop']}, is_slop=False: {summary['not_slop']} "
-        f"(legacy 3-class: {summary['accepted']} accepted, "
-        f"{summary['rejected_quality']} rejected_quality, "
-        f"{summary['slop']} slop)"
+        f"is_slop=True: {summary['is_slop']}, is_slop=False: {summary['not_slop']}"
     )
 
 
@@ -374,14 +371,6 @@ def eval(
         row += "".join(f"{m['confusion_matrix'][true_cls][pred]:>12}" for pred in decisions)
         typer.echo(row)
     typer.echo("")
-    by_class = m.get("by_golden_class", {})
-    if by_class:
-        typer.echo("Breakdown by golden class:")
-        typer.echo(f"{'golden_label':<22}{'predicted approve':>20}{'predicted reject':>20}")
-        for cls in ("accepted", "rejected_quality", "slop"):
-            row = by_class.get(cls, {"approve": 0, "reject": 0})
-            typer.echo(f"{cls:<22}{row.get('approve', 0):>20}{row.get('reject', 0):>20}")
-        typer.echo("")
 
     # Find the most recent output file
     runs = sorted(out_dir.glob("*.json"), reverse=True)

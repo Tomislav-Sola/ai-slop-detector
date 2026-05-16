@@ -4,8 +4,8 @@ from __future__ import annotations
 from pr_triage.eval import compute_metrics, load_golden_entries, entry_to_state
 
 
-def _result(golden_label: str, predicted: str) -> dict:
-    return {"golden_label": golden_label, "predicted_decision": predicted}
+def _result(is_slop: bool, predicted: str) -> dict:
+    return {"is_slop": is_slop, "predicted_decision": predicted}
 
 
 # ------------------------------------------------------------------
@@ -13,11 +13,10 @@ def _result(golden_label: str, predicted: str) -> dict:
 # ------------------------------------------------------------------
 
 def test_perfect_accuracy():
-    """Binary metric: rejected_quality maps to approve (not slop)."""
     results = [
-        _result("accepted", "approve"),
-        _result("rejected_quality", "approve"),
-        _result("slop", "reject"),
+        _result(False, "approve"),
+        _result(False, "approve"),
+        _result(True, "reject"),
     ]
     m = compute_metrics(results)
     assert m["accuracy"] == 1.0
@@ -26,9 +25,9 @@ def test_perfect_accuracy():
 
 def test_zero_accuracy():
     results = [
-        _result("accepted", "reject"),
-        _result("rejected_quality", "reject"),
-        _result("slop", "approve"),
+        _result(False, "reject"),
+        _result(False, "reject"),
+        _result(True, "approve"),
     ]
     m = compute_metrics(results)
     assert m["accuracy"] == 0.0
@@ -37,9 +36,9 @@ def test_zero_accuracy():
 
 def test_partial_accuracy():
     results = [
-        _result("accepted", "approve"),    # correct
-        _result("slop", "approve"),         # wrong (slop predicted not-slop)
-        _result("slop", "reject"),          # correct
+        _result(False, "approve"),  # correct
+        _result(True, "approve"),    # wrong (slop predicted not-slop)
+        _result(True, "reject"),     # correct
     ]
     m = compute_metrics(results)
     assert m["n_correct"] == 2
@@ -49,9 +48,9 @@ def test_partial_accuracy():
 def test_slop_precision_recall_f1_perfect():
     """All slop cases predicted reject, all non-slop predicted approve."""
     results = [
-        _result("accepted", "approve"),
-        _result("rejected_quality", "approve"),
-        _result("slop", "reject"),
+        _result(False, "approve"),
+        _result(False, "approve"),
+        _result(True, "reject"),
     ]
     m = compute_metrics(results)
     assert m["slop_precision"] == 1.0
@@ -61,7 +60,7 @@ def test_slop_precision_recall_f1_perfect():
 
 def test_confusion_matrix_shape():
     """Binary confusion matrix has only approve/reject rows and cols."""
-    results = [_result("accepted", "approve")]
+    results = [_result(False, "approve")]
     m = compute_metrics(results)
     cm = m["confusion_matrix"]
     for row in ["approve", "reject"]:
@@ -77,27 +76,12 @@ def test_empty_results():
 
 
 def test_zero_division_safe():
-    """A class with 0 TP, 0 FP, 0 FN should not crash."""
-    results = [_result("accepted", "approve")]
+    """No slop examples present — slop precision/recall/F1 should be 0, not error."""
+    results = [_result(False, "approve")]
     m = compute_metrics(results)
-    # No slop examples present → slop precision/recall/F1 should be 0, not error.
     assert m["slop_precision"] == 0.0
     assert m["slop_recall"] == 0.0
     assert m["slop_f1"] == 0.0
-
-
-def test_by_golden_class_breakdown_kept():
-    """Secondary 3-class breakdown helps debugging — should remain in the output."""
-    results = [
-        _result("accepted", "approve"),
-        _result("rejected_quality", "reject"),  # false positive
-        _result("slop", "reject"),
-    ]
-    m = compute_metrics(results)
-    by = m["by_golden_class"]
-    assert by["accepted"]["approve"] == 1
-    assert by["rejected_quality"]["reject"] == 1
-    assert by["slop"]["reject"] == 1
 
 
 # ------------------------------------------------------------------
@@ -122,8 +106,7 @@ def test_entry_to_state_minimal():
         "deletions": 2,
         "changed_files": 1,
         "merged": True,  # fixture says merged
-        "golden_label": "accepted",
-        "label_notes": "",
+        "is_slop": False,
     }
     state = entry_to_state(entry)
     assert state.repo == "o/r"
@@ -146,8 +129,7 @@ def test_entry_to_state_files_changed_dict_format():
         "additions": 1, "deletions": 0, "changed_files": 1,
         "merged": False,
         "files_changed": [{"filename": "src/foo.py"}],
-        "golden_label": "slop",
-        "label_notes": "",
+        "is_slop": True,
     }
     state = entry_to_state(entry)
     assert state.files_changed == ["src/foo.py"]

@@ -385,7 +385,6 @@ def test_golden_build_exits_on_error(tmp_path):
 def test_golden_build_happy_path(tmp_path):
     with patch("pr_triage.golden.build_golden_set", return_value={
         "total": 30, "is_slop": 5, "not_slop": 25,
-        "accepted": 10, "rejected_quality": 15, "slop": 5,
     }):
         result = runner.invoke(
             app,
@@ -394,3 +393,4 @@ def test_golden_build_happy_path(tmp_path):
     assert result.exit_code == 0
     assert "30" in result.output
     assert "is_slop=True: 5" in result.output
+    assert "is_slop=False: 25" in result.output
