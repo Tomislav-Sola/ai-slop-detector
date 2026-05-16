@@ -1,5 +1,10 @@
 # pr-triage
 
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-78%25-yellow.svg)](#development)
+[![Status](https://img.shields.io/badge/status-v0.3.0-blue.svg)](#current-phase-status)
+
 A CLI tool (and planned GitHub Action) that flags AI-slop pull requests using a multi-critic LangGraph pipeline with RAG. Built to help OSS maintainers handle the surge of low-effort, AI-generated PRs.
 
 ## What this is
