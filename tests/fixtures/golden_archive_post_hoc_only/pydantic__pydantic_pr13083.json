@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-15T17:53:51.978880+00:00"
+  },
+  "repo": "pydantic/pydantic",
+  "pr_number": 13083,
+  "title": "fix: skip deep-copying fields in model_copy when replaced by update",
+  "body": "## Summary\n\nWhen `model_copy(deep=True, update=...)` is called, the current implementation deepcopies the **entire** model first, then overwrites fields from `update`. This causes two problems:\n\n1. **Wasteful performance**: fields that will be replaced are deep-copied for nothing\n2. **Fails on non-copyable fields**: if a field contains an object that cannot be deep-copied (e.g., file handles, C extensions), `model_copy(deep=True, update={...})` raises `TypeError` even though that field would be replaced\n\nThis PR changes the behavior so that when both `deep=True` and `update` are provided, fields present in `update` are shallow-copied instead of deep-copied.\n\nFixes #13077\n\n## Test plan\n- [x] Existing `model_copy` tests pass (4/4)\n- [x] Full `test_main.py` suite passes (241/241)\n- [x] Verified fix with non-copyable field example from the issue\n- [x] No changes to `model_copy(deep=True)` without `update` (still deep-copies everything)\n- [x] No changes to `model_copy(update=...)` without `deep` (still shallow-copies)",
+  "author": "Bester1",
+  "author_association": "NONE",
+  "created_at": "2026-04-15T22:26:10Z",
+  "updated_at": "2026-04-30T09:26:46Z",
+  "closed_at": "2026-04-30T09:26:46Z",
+  "merged_at": null,
+  "base_branch": "main",
+  "head_branch": "fix-model-copy-deep-update",
+  "additions": 26,
+  "deletions": 1,
+  "changed_files": 1,
+  "files_changed": [
+    "pydantic/main.py"
+  ],
+  "labels": [],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 0,
+  "linked_issues": [
+    {
+      "number": 13077,
+      "repo": null,
+      "title": "`model_copy(deep=True, update=...)` unnecessarily deepcopies fields that will be replaced by `update`"
+    }
+  ],
+  "issue_comments": [],
+  "bot_comments": [
+    {
+      "user": "codspeed-hq[bot]",
+      "author_association": "NONE",
+      "body": "<!-- __CODSPEED_PERFORMANCE_REPORT_COMMENT__ -->\n## Merging this PR will **not alter performance**\n\n\n\n\n`\u2705 215` untouched benchmarks  \n\n\n\n---\n\n<sub>Comparing <code>Bester1:fix-model-copy-deep-update</code> (92c3c16) with <code>main</code> (b7e81cf)</sub>\n\n<a href=\"https://codspeed.io/pydantic/pydantic/branches/Bester1%3Afix-model-copy-deep-update?utm_source=github&utm_medium=comment-v2&utm_content=button\">\n  <picture>\n    <source media=\"(prefers-color-scheme: dark)\" srcset=\"https://codspeed.io/pr-report/open-in-codspeed-dark.svg\">\n    <source media=\"(prefers-color-scheme: light)\" srcset=\"https://codspeed.io/pr-report/open-in-codspeed-light.svg\">\n    <img alt=\"Open in CodSpeed\" src=\"https://codspeed.io/pr-report/open-in-codspeed-light.svg\" width=\"169\" height=\"32\">\n  </picture>\n</a>\n\n",
+      "created_at": "2026-04-15T22:36:05+00:00"
+    },
+    {
+      "user": "github-actions[bot]",
+      "author_association": "CONTRIBUTOR",
+      "body": "## Coverage report\n\n\n<img title=\"Coverage for the whole project is 95.88%. Previous coverage rate is not available, cannot report on evolution.\" src=\"https://img.shields.io/badge/Coverage-95%25-orange.svg\"> <img title=\"38.46% of the statement lines added by this PR are covered\" src=\"https://img.shields.io/badge/PR%20Coverage-38%25-red.svg\"><details><summary>Click to see where and how coverage changed</summary><table><thead>\n  <tr><th>File</th><th>Statements</th><th>Missing</th><th>Coverage</th><th>Coverage<br>(new stmts)</th><th>Lines missing</th></tr>\n</thead>\n<tbody><tr>\n<td colspan=\"6\">&nbsp;&nbsp;<b>pydantic</b></td><tr>\n<td>&nbsp;&nbsp;<a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-8708af8d26c26644976866f974e0b810b0940ede43ff487e457057d5a1f07999\">main.py</a></td>\n<td align=\"center\"><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-8708af8d26c26644976866f974e0b810b0940ede43ff487e457057d5a1f07999\"><img title=\"This PR adds 555 statements to pydantic/main.py. The file did not seem to exist on the base branch.\" src=\"https://img.shields.io/badge/555-%28%2B555%29-007ec6.svg\"></a></td><td align=\"center\"><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-8708af8d26c26644976866f974e0b810b0940ede43ff487e457057d5a1f07999\"><img title=\"This PR adds 17 statements missing coverage to pydantic/main.py. The file did not seem to exist on the base branch.\" src=\"https://img.shields.io/badge/17-%28%2B17%29-red.svg\"></a></td><td align=\"center\"><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-8708af8d26c26644976866f974e0b810b0940ede43ff487e457057d5a1f07999\"><img title=\"The coverage rate of pydantic/main.py is 96.65% (538/555). The file did not seem to exist on the base branch.\" src=\"https://img.shields.io/badge/96%25-%28538/555%29-orange.svg\"></a></td><td align=\"center\"><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-8708af8d26c26644976866f974e0b810b0940ede43ff487e457057d5a1f07999\"><img title=\"In this PR, 13 new statements are added to pydantic/main.py, 5 of which are covered (38.46%).\" src=\"https://img.shields.io/badge/38%25-%285/13%29-red.svg\"></a></td><td><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-8708af8d26c26644976866f974e0b810b0940ede43ff487e457057d5a1f07999R416-R428\">416-428</a></td></tbody>\n<tfoot>\n<tr>\n<td><b>Project Total</b></td>\n<td align=\"center\"><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-4b0bf2efa3367c0072ac2bf1e234e703dc46b47aaa4fe9d3b01737b1a15752b1\"><img title=\"This PR adds 11172 statements to the whole project. The file did not seem to exist on the base branch.\" src=\"https://img.shields.io/badge/11k-%28%2B11172%29-007ec6.svg\"></a></td><td align=\"center\"><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-4b0bf2efa3367c0072ac2bf1e234e703dc46b47aaa4fe9d3b01737b1a15752b1\"><img title=\"This PR adds 342 statements missing coverage to the whole project. The file did not seem to exist on the base branch.\" src=\"https://img.shields.io/badge/342-%28%2B342%29-red.svg\"></a></td><td align=\"center\"><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-4b0bf2efa3367c0072ac2bf1e234e703dc46b47aaa4fe9d3b01737b1a15752b1\"><img title=\"The coverage rate of the whole project is 95.88% (10830/11172). The file did not seem to exist on the base branch.\" src=\"https://img.shields.io/badge/95%25-%2811k/11k%29-orange.svg\"></a></td><td align=\"center\"><a href=\"https://github.com/pydantic/pydantic/pull/13083/files#diff-4b0bf2efa3367c0072ac2bf1e234e703dc46b47aaa4fe9d3b01737b1a15752b1\"><img title=\"In this PR, 13 new statements are added to the whole project, 5 of which are covered (38.46%).\" src=\"https://img.shields.io/badge/38%25-%285/13%29-red.svg\"></a></td><td>&nbsp;</td>\n</tr>\n</tfoot>\n</table>\n\n<sub>\n\nThis report was generated by [python-coverage-comment-action](https://github.com/py-cov-action/python-coverage-comment-action)\n\n</sub>\n</details>\n\n\n\n<!-- This comment was produced by python-coverage-comment-action -->",
+      "created_at": "2026-04-16T07:35:18+00:00"
+    }
+  ],
+  "review_comments": [],
+  "raw_diff": "diff --git a/pydantic/main.py b/pydantic/main.py\nindex 3cf58213baf..587aa6ffd35 100644\n--- a/pydantic/main.py\n+++ b/pydantic/main.py\n@@ -409,7 +409,32 @@ def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = Fa\n         Returns:\n             New model instance.\n         \"\"\"\n-        copied = self.__deepcopy__() if deep else self.__copy__()\n+        if deep and update:\n+            # When deep=True with update, skip deep-copying fields that will be\n+            # replaced by update. This avoids unnecessary work and supports\n+            # fields that cannot be deep-copied (e.g. file handles, C extensions).\n+            cls = type(self)\n+            copied = cls.__new__(cls)\n+            _object_setattr(\n+                copied,\n+                '__dict__',\n+                {k: (deepcopy(v, memo={}) if k not in update else v) for k, v in self.__dict__.items()},\n+            )\n+            _object_setattr(copied, '__pydantic_extra__', deepcopy(self.__pydantic_extra__, memo={}))\n+            _object_setattr(copied, '__pydantic_fields_set__', copy(self.__pydantic_fields_set__))\n+            if not hasattr(self, '__pydantic_private__') or self.__pydantic_private__ is None:\n+                _object_setattr(copied, '__pydantic_private__', None)\n+            else:\n+                _object_setattr(\n+                    copied,\n+                    '__pydantic_private__',\n+                    deepcopy(\n+                        {k: v for k, v in self.__pydantic_private__.items() if v is not PydanticUndefined},\n+                        memo={},\n+                    ),\n+                )\n+        else:\n+            copied = self.__deepcopy__() if deep else self.__copy__()\n         if update:\n             if self.model_config.get('extra') == 'allow':\n                 for k, v in update.items():\n",
+  "golden_label": "slop",
+  "label_notes": "Silent-slop pattern: first-time author (prior_prs=0), no maintainer engagement, closed-unmerged after 14 days. Subtle slop variant \u2014 no Claude Code footer, no obvious AI markers, clean focused diff. The smoking gun is coverage: PR claims 'verified fix with non-copyable field example' but adds no new tests; coverage-bot reports 38% on new statements (8/13 untested). New if deep and update code path is entirely uncovered. Plausible-looking code without actual verification \u2014 classic AI-generated submission pattern.",
+  "is_slop": true
+}

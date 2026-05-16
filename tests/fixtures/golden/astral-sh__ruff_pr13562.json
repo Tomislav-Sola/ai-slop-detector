@@ -1,0 +1,271 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:23:05.340771+00:00"
+  },
+  "repo": "astral-sh/ruff",
+  "pr_number": 13562,
+  "title": "Add some basic subscript type inference",
+  "body": "## Summary\r\n\r\nJust for tuples and strings -- the easiest cases. I think most of the rest require generic support?\r\n",
+  "author": "charliermarsh",
+  "created_at": "2024-09-30T02:51:48Z",
+  "updated_at": "2026-05-11T01:52:02Z",
+  "closed_at": "2024-09-30T20:50:46Z",
+  "merged_at": "2024-09-30T20:50:46Z",
+  "base_branch": "main",
+  "head_branch": "charlie/sub",
+  "additions": 228,
+  "deletions": 5,
+  "changed_files": 1,
+  "files_changed": [
+    "crates/red_knot_python_semantic/src/types/infer.rs"
+  ],
+  "labels": [
+    "ty"
+  ],
+  "draft": false,
+  "merged": true,
+  "author_prior_prs_in_repo": 999,
+  "linked_issues": [],
+  "issue_comments": [
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Okay thanks, will re-request review once I've addressed feedback.",
+      "created_at": "2024-09-30T14:18:22+00:00"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Actually, it should be fine to merge in its current state. I'll look at doing the dunder fallback and diagnostics in a separate PR to keep this small.",
+      "created_at": "2024-09-30T14:20:54+00:00"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Added diagnostics, though unsure if there are established patterns around the rule names, granularity, etc.",
+      "created_at": "2024-09-30T16:26:36+00:00"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "> Added diagnostics, though unsure if there are established patterns around the rule names, granularity, etc.\r\n\r\nIt's a bit of a wild west right now, I wouldn't worry about that too much! I'm sure we'll clean them up at some point (and make the diagnostics less stringly typed etc.). Micha's proposals he shared during the on-site go some way to addressing this.",
+      "created_at": "2024-09-30T16:28:15+00:00"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Sounds good, I figured as much :)",
+      "created_at": "2024-09-30T16:29:09+00:00"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Thanks for the thorough reviews, much appreciated! I'll look at the `__getitem__` part next.",
+      "created_at": "2024-09-30T20:51:00+00:00"
+    }
+  ],
+  "bot_comments": [
+    {
+      "user": "github-actions[bot]",
+      "author_association": "CONTRIBUTOR",
+      "body": "<!-- generated-comment ecosystem -->\n## `ruff-ecosystem` results\n### Linter (stable)\n\u2705 ecosystem check detected no linter changes.\n\n### Linter (preview)\n\u2705 ecosystem check detected no linter changes.\n\n\n",
+      "created_at": "2024-09-30T10:53:50+00:00"
+    }
+  ],
+  "review_comments": [
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "I assume it is beneficial to compute the `StringLiteral` when we can?",
+      "created_at": "2024-09-30T02:52:04+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "What's the general philosophy around when we should error in a case like this?",
+      "created_at": "2024-09-30T02:52:17+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "yup",
+      "created_at": "2024-09-30T10:46:18+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "There's a few things to note here.\r\n\r\n### Issues with `LiteralString`\r\n\r\nAccording to a strict reading of [PEP 675](https://peps.python.org/pep-0675/#type-inference), I don't think this is a legal place where we can infer `LiteralString`, since the PEP states:\r\n\r\n> As per the [Rationale](https://peps.python.org/pep-0675/#rationale), we also infer `LiteralString` in the following cases:\r\n> \r\n> [...]\r\n>\r\n> - Literal-preserving methods: In [Appendix C](https://peps.python.org/pep-0675/#pep-675-appendix-c), we have provided an exhaustive list of `str` methods that preserve the `LiteralString` type.\r\n\r\n`str.__getitem__` is not listed in Appendix C of the PEP, so I suppose that means that we're not allowed to infer `LiteralString` for `x`, `y` or `z` in a snippet like this:\r\n\r\n```py\r\ndef foo(a: Literal[\"foo\"], b: LiteralString, c: int):\r\n    x = a[c]\r\n    y = b[42]\r\n    z = b[c]\r\n```\r\n\r\nI'm not sure what the status of Appendix C is, though... it doesn't seem to have been copied into the [relevant section](https://typing.readthedocs.io/en/latest/spec/literal.html#valid-locations-for-literalstring) of the typing spec, so perhaps it isn't canonical anymore? Or maybe that was just an omission when writing the spec? There's also the question of typeshed's stubs: typeshed doesn't include a `LiteralString` overload in its stub for `str.__getitem__`, although it includes `LiteralString` overloads for many of its other `str` methods. I'm not sure if there's a reason for that or not -- even if not, it may be desirable to be in sync with typeshed here.\r\n\r\nFor now I think I'd just delete this branch -- continuing to fallback to `Unknown` is ~fine for now.\r\n\r\n### Emitting diagnostics\r\n\r\nIn general, if we can't infer that an operation creates a `Literal` type (whether that's `LiteralString` or `StringLiteral`), we should fall back to typeshed's stubs. Here that means falling back to `builtins.str.__getitem__` -- you'd do something like `value_ty.to_meta_type(db).member(db, \"__getitem__\").call(&[value_ty, slice_ty])` to figure out what the type of the subscript expression is. Except there are some complications ;) Take a look at `Type::iterate` for a more complete example of how we lookup dunder methods elsewhere, try to call them, and emit a diagnostic if the dunder method eithere doesn't exist or isn't callable. https://github.com/astral-sh/ruff/blob/5118166d21784e7c78e38ea42919ba50bb2a5142/crates/red_knot_python_semantic/src/types.rs#L629-L684",
+      "created_at": "2024-09-30T11:17:37+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n    fn subscript_literal_string() -> anyhow::Result<()> {\r\n```",
+      "created_at": "2024-09-30T11:17:47+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "`c` leads to a `TypeError` at runtime; this isn't correct. `TypeError`s should always cause us to infer `Unknown`. We should emit a diagnostic and infer `Unknown` rather than `LiteralString`",
+      "created_at": "2024-09-30T11:18:50+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "What is the plan for emitting those diagnostics? Don't we need to propagate some information about _why_ it failed?",
+      "created_at": "2024-09-30T13:02:58+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "Of course! Like I said in https://github.com/astral-sh/ruff/pull/13559#issuecomment-2382679447, take a look at the `add_diagnostic` and `not_iterable_diagnostic` methods for how we do this elsewhere",
+      "created_at": "2024-09-30T13:10:37+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "You need to add calls to `self.add_diagnostic()` on all these `else {Type::Unknown}` branches (or add a helper method, similar to our `not_iterable_diagnostic()` helper, and call that from each branch)",
+      "created_at": "2024-09-30T14:24:09+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "It seems like that shouldn't be \"necessary\" for the PR to merge given that we have fallbacks to `Type::Unknown` everywhere without diagnostics (`infer_import_definition` would be a good example), but I'll add it here.",
+      "created_at": "2024-09-30T14:28:13+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "> `infer_import_definition` would be a good example\r\n\r\nWe emit a diagnostic here in that method when we can't resolve the import, no? https://github.com/astral-sh/ruff/blob/5f4b2823277df38fc222e9d8096b805f9cc34c74/crates/red_knot_python_semantic/src/types/infer.rs#L1314",
+      "created_at": "2024-09-30T14:32:20+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "But yeah, we can defer adding the calls to `add_diagnostic` if you want! But I'd definitely like us to at least add `TODO` comments for these branches if we are going to defer it. Inferring `Unknown` is correct here, but we shouldn't do it silently without emitting a diagnostic to the user informing them about the error, and I think there's a strong chance we'll forget about this otherwise",
+      "created_at": "2024-09-30T14:35:15+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "(I was referring to:\r\n\r\n```rust\r\ntracing::debug!(\"Failed to resolve import due to invalid syntax\");\r\nType::Unknown\r\n```\r\n)",
+      "created_at": "2024-09-30T14:42:55+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "Right, but that's because we'll have already emitted a diagnostic in an earlier pass if the node contains invalid syntax; there's no need to duplicate the parser's diagnostic in the type inference builder. That's not true for the branches you're adding here, however",
+      "created_at": "2024-09-30T14:45:46+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "The other two diagnostics look great to me, but this I don't think is correct. These diagnostics will be messages shown to users indicating errors in their code, but this diagnostic doesn't represent that -- it represents an implementation detail of how we're representing Python types in Rust.\r\n\r\nI think if we get an `IntLiteral` so big that it can't fit into a `usize`, we don't actually need to know its precise value here, because we _know_ it will represent an index-out-of-bounds for both a string-literal and a tuple:\r\n- The maximum size of a string-literal type is set here: https://github.com/astral-sh/ruff/blob/d86b73eb3dbcf06552a2e4d316ef1765608bf4a4/crates/red_knot_python_semantic/src/types/infer.rs#L282\r\n- The maximum size of a heterogenous tuple type will be `usize::Max`, due to the `TupleType` definition here: https://github.com/astral-sh/ruff/blob/d86b73eb3dbcf06552a2e4d316ef1765608bf4a4/crates/red_knot_python_semantic/src/types.rs#L1214-L1218\r\n\r\nAn `i64` bigger than `usize::MAX` will be bigger than either of those numbers",
+      "created_at": "2024-09-30T16:40:37+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "I don't agree with the pedantic reading of PEP 675 (or typeshed) as a rationale for removing this branch. Many useful things are simply overlooked. If a more precise type inference is clearly correct in terms of the runtime semantics, and there's nothing in the typing spec or conformance suite explicitly prohibiting it, then I think we should feel totally free to go ahead and do it.\r\n\r\nIt is clearly correct wrt the runtime semantics to infer `LiteralString` as the result of indexing into a `LiteralString` or `StringLiteral`.",
+      "created_at": "2024-09-30T16:42:20+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "On second thought, given the security rationale for `LiteralString`, there _may_ be an argument that untrusted-user-supplied indices could allow turning a \"safe\" `LiteralString` into an \"unsafe\" one via careful cropping. I have mixed feelings about this, because there's also type-system value to `LiteralString` (we know it is really a built-in `str`, not a subclass), and in type-system terms, the inference of `LiteralString` is correct. And the security issue seems fairly contrived. But that _might_ be why inference of `LiteralString` on `__getitem__` is not in the PEP?",
+      "created_at": "2024-09-30T16:51:14+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "> It is clearly correct wrt the runtime semantics to infer `LiteralString` as the result of indexing into a `LiteralString` or `StringLiteral`.\r\n\r\nI agree, but the fact that PEP-675 is so clear that the list of string methods in Appendix C is valid is meant to be \"exhaustive\" made me worried that there was something I was misunderstanding :-) and until recently, PEP-675 _was_ the spec -- it's not clear to me whether Appendix C was deliberately kept out of the typing spec or not.\r\n\r\nThis branch was anyway incorrect -- `StringLiteral` cannot be indexed into with objects of arbitraty types, which is what this branch allowed before Charlie removed it.",
+      "created_at": "2024-09-30T16:52:36+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Yes, we shouldn't emit this as a diagnostic. Wherever we would do so, we should just silently fall back to whatever type we can safely infer without knowing the precise index.",
+      "created_at": "2024-09-30T16:53:04+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Not sure if typo or intentional, but \"out of bounds\" would be the usual terminology here; \"out of band\" usually means something else (side-channel communication.)\r\n\r\n```suggestion\r\n    pub(super) fn tuple_index_out_of_bounds_diagnostic(\r\n```",
+      "created_at": "2024-09-30T16:57:45+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "```suggestion\r\n    pub(super) fn string_index_out_of_bounds_diagnostic(\r\n```",
+      "created_at": "2024-09-30T16:58:11+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "So to clarify... We need to add a branch for `__getitem__` (in general -- I plan to do this in a separate PR), and slices into `StringLiteral` (with non-int literal indexes) should be handled by that branch? Or do we want to resolve to `LiteralString`?",
+      "created_at": "2024-09-30T17:05:23+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Removed",
+      "created_at": "2024-09-30T17:11:17+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Python allows negative indexing, which indexes from the end of the container:\r\n\r\n```\r\n>>> t = (1, 2, 3)\r\n>>> t[-1]\r\n3\r\n```\r\n\r\nSo we should handle that here. I would say we don't have to do it in this PR, and we can just add a TODO, but I don't like that in the meantime this would mean we'd wrongly emit an out-of-bounds error.",
+      "created_at": "2024-09-30T17:16:04+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Hah sorry, that's just a typo.",
+      "created_at": "2024-09-30T17:27:41+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "I'll handle it here, thanks.",
+      "created_at": "2024-09-30T17:28:09+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "After further thought, I don't really buy the possible security argument I mentioned above for not inferring `LiteralString`: you can easily construct many other cases where the contents of a `LiteralString`, though always originating from a literal string in the source code, could be _influenced_ in some way by untrusted user input (e.g. determining whether some concatenation does or doesn't occur.)\r\n\r\nBut that said, I don't think this is critical, and it is probably best to just rely on typeshed for this. So we could at some point consider proposing a change to typeshed with a `LiteralString` overload for `str.__getitem__`, but I don't think it's worth an extra special case in red-knot to diverge from typeshed here.\r\n\r\nSo yeah, I would say let's just add the branch that uses the return type from `__getitem__`, as Alex suggested. (And yeah, fine for that to be a separate follow-up if you prefer.\r\n\r\n(I suspect, but don't know, that the reason Appendix C isn't in the type spec is that it was considered to already be reflected in the typeshed change.)",
+      "created_at": "2024-09-30T17:42:06+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    }
+  ],
+  "raw_diff": "diff --git a/crates/red_knot_python_semantic/src/types/infer.rs b/crates/red_knot_python_semantic/src/types/infer.rs\nindex 37a83a1cfaaf0..73b6930b2399f 100644\n--- a/crates/red_knot_python_semantic/src/types/infer.rs\n+++ b/crates/red_knot_python_semantic/src/types/infer.rs\n@@ -1250,6 +1250,42 @@ impl<'db> TypeInferenceBuilder<'db> {\n         );\n     }\n \n+    /// Emit a diagnostic declaring that an index is out of bounds for a tuple.\n+    pub(super) fn tuple_index_out_of_bounds_diagnostic(\n+        &mut self,\n+        node: AnyNodeRef,\n+        tuple_ty: Type<'db>,\n+        length: usize,\n+        index: i64,\n+    ) {\n+        self.add_diagnostic(\n+            node,\n+            \"index-out-of-bounds\",\n+            format_args!(\n+                \"Index {index} is out of bounds for tuple of type '{}' with length {length}.\",\n+                tuple_ty.display(self.db)\n+            ),\n+        );\n+    }\n+\n+    /// Emit a diagnostic declaring that an index is out of bounds for a string.\n+    pub(super) fn string_index_out_of_bounds_diagnostic(\n+        &mut self,\n+        node: AnyNodeRef,\n+        string_ty: Type<'db>,\n+        length: usize,\n+        index: i64,\n+    ) {\n+        self.add_diagnostic(\n+            node,\n+            \"index-out-of-bounds\",\n+            format_args!(\n+                \"Index {index} is out of bounds for string '{}' with length {length}.\",\n+                string_ty.display(self.db)\n+            ),\n+        );\n+    }\n+\n     fn infer_for_statement_definition(\n         &mut self,\n         target: &ast::ExprName,\n@@ -2380,11 +2416,127 @@ impl<'db> TypeInferenceBuilder<'db> {\n             ctx: _,\n         } = subscript;\n \n-        self.infer_expression(slice);\n-        self.infer_expression(value);\n-\n-        // TODO actual subscript support\n-        Type::Unknown\n+        let value_ty = self.infer_expression(value);\n+        let slice_ty = self.infer_expression(slice);\n+\n+        match (value_ty, slice_ty) {\n+            // Ex) Given `(\"a\", \"b\", \"c\", \"d\")[1]`, return `\"b\"`\n+            (Type::Tuple(tuple_ty), Type::IntLiteral(int)) if int >= 0 => {\n+                let elements = tuple_ty.elements(self.db);\n+                usize::try_from(int)\n+                    .ok()\n+                    .and_then(|index| elements.get(index).copied())\n+                    .unwrap_or_else(|| {\n+                        self.tuple_index_out_of_bounds_diagnostic(\n+                            (&**value).into(),\n+                            value_ty,\n+                            elements.len(),\n+                            int,\n+                        );\n+                        Type::Unknown\n+                    })\n+            }\n+            // Ex) Given `(\"a\", \"b\", \"c\", \"d\")[-1]`, return `\"c\"`\n+            (Type::Tuple(tuple_ty), Type::IntLiteral(int)) if int < 0 => {\n+                let elements = tuple_ty.elements(self.db);\n+                int.checked_neg()\n+                    .and_then(|int| usize::try_from(int).ok())\n+                    .and_then(|index| elements.len().checked_sub(index))\n+                    .and_then(|index| elements.get(index).copied())\n+                    .unwrap_or_else(|| {\n+                        self.tuple_index_out_of_bounds_diagnostic(\n+                            (&**value).into(),\n+                            value_ty,\n+                            elements.len(),\n+                            int,\n+                        );\n+                        Type::Unknown\n+                    })\n+            }\n+            // Ex) Given `(\"a\", \"b\", \"c\", \"d\")[True]`, return `\"b\"`\n+            (Type::Tuple(tuple_ty), Type::BooleanLiteral(bool)) => {\n+                let elements = tuple_ty.elements(self.db);\n+                let int = i64::from(bool);\n+                elements.get(usize::from(bool)).copied().unwrap_or_else(|| {\n+                    self.tuple_index_out_of_bounds_diagnostic(\n+                        (&**value).into(),\n+                        value_ty,\n+                        elements.len(),\n+                        int,\n+                    );\n+                    Type::Unknown\n+                })\n+            }\n+            // Ex) Given `\"value\"[1]`, return `\"a\"`\n+            (Type::StringLiteral(literal_ty), Type::IntLiteral(int)) if int >= 0 => {\n+                let literal_value = literal_ty.value(self.db);\n+                usize::try_from(int)\n+                    .ok()\n+                    .and_then(|index| literal_value.chars().nth(index))\n+                    .map(|ch| {\n+                        Type::StringLiteral(StringLiteralType::new(\n+                            self.db,\n+                            ch.to_string().into_boxed_str(),\n+                        ))\n+                    })\n+                    .unwrap_or_else(|| {\n+                        self.string_index_out_of_bounds_diagnostic(\n+                            (&**value).into(),\n+                            value_ty,\n+                            literal_value.chars().count(),\n+                            int,\n+                        );\n+                        Type::Unknown\n+                    })\n+            }\n+            // Ex) Given `\"value\"[-1]`, return `\"e\"`\n+            (Type::StringLiteral(literal_ty), Type::IntLiteral(int)) if int < 0 => {\n+                let literal_value = literal_ty.value(self.db);\n+                int.checked_neg()\n+                    .and_then(|int| usize::try_from(int).ok())\n+                    .and_then(|index| index.checked_sub(1))\n+                    .and_then(|index| literal_value.chars().rev().nth(index))\n+                    .map(|ch| {\n+                        Type::StringLiteral(StringLiteralType::new(\n+                            self.db,\n+                            ch.to_string().into_boxed_str(),\n+                        ))\n+                    })\n+                    .unwrap_or_else(|| {\n+                        self.string_index_out_of_bounds_diagnostic(\n+                            (&**value).into(),\n+                            value_ty,\n+                            literal_value.chars().count(),\n+                            int,\n+                        );\n+                        Type::Unknown\n+                    })\n+            }\n+            // Ex) Given `\"value\"[True]`, return `\"a\"`\n+            (Type::StringLiteral(literal_ty), Type::BooleanLiteral(bool)) => {\n+                let literal_value = literal_ty.value(self.db);\n+                let int = i64::from(bool);\n+                literal_value\n+                    .chars()\n+                    .nth(usize::from(bool))\n+                    .map(|ch| {\n+                        Type::StringLiteral(StringLiteralType::new(\n+                            self.db,\n+                            ch.to_string().into_boxed_str(),\n+                        ))\n+                    })\n+                    .unwrap_or_else(|| {\n+                        self.string_index_out_of_bounds_diagnostic(\n+                            (&**value).into(),\n+                            value_ty,\n+                            literal_value.chars().count(),\n+                            int,\n+                        );\n+                        Type::Unknown\n+                    })\n+            }\n+            _ => Type::Unknown,\n+        }\n     }\n \n     fn infer_slice_expression(&mut self, slice: &ast::ExprSlice) -> Type<'db> {\n@@ -6399,6 +6551,77 @@ mod tests {\n         Ok(())\n     }\n \n+    #[test]\n+    fn subscript_tuple() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+            t = (1, 'a', 'b')\n+\n+            a = t[0]\n+            b = t[1]\n+            c = t[-1]\n+            d = t[-2]\n+            e = t[4]\n+            f = t[-4]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"Literal[1]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"b\", \"Literal[\\\"a\\\"]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"c\", \"Literal[\\\"b\\\"]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"d\", \"Literal[\\\"a\\\"]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"e\", \"Unknown\");\n+        assert_public_ty(&db, \"/src/a.py\", \"f\", \"Unknown\");\n+\n+        assert_file_diagnostics(\n+            &db,\n+            \"src/a.py\",\n+            &[\"Index 4 is out of bounds for tuple of type 'tuple[Literal[1], Literal[\\\"a\\\"], Literal[\\\"b\\\"]]' with length 3.\", \"Index -4 is out of bounds for tuple of type 'tuple[Literal[1], Literal[\\\"a\\\"], Literal[\\\"b\\\"]]' with length 3.\"],\n+        );\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_literal_string() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+            s = 'abcde'\n+\n+            a = s[0]\n+            b = s[1]\n+            c = s[-1]\n+            d = s[-2]\n+            e = s[8]\n+            f = s[-8]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"Literal[\\\"a\\\"]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"b\", \"Literal[\\\"b\\\"]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"c\", \"Literal[\\\"e\\\"]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"d\", \"Literal[\\\"d\\\"]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"e\", \"Unknown\");\n+        assert_public_ty(&db, \"/src/a.py\", \"f\", \"Unknown\");\n+\n+        assert_file_diagnostics(\n+            &db,\n+            \"src/a.py\",\n+            &[\n+                \"Index 8 is out of bounds for string 'Literal[\\\"abcde\\\"]' with length 5.\",\n+                \"Index -8 is out of bounds for string 'Literal[\\\"abcde\\\"]' with length 5.\",\n+            ],\n+        );\n+\n+        Ok(())\n+    }\n+\n     #[test]\n     fn boolean_or_expression() -> anyhow::Result<()> {\n         let mut db = setup_db();\n",
+  "golden_label": "accepted",
+  "label_notes": "First accepted case in corpus, ruff/red_knot gold-standard anchor. charliermarsh (prior_prs=999, MEMBER, ruff/Astral co-founder) submitted +228/-5 PR implementing basic subscript type inference for tuples and string literals in red_knot Python type checker. Substantial engineering quality: 18h merge cycle with 25+ substantive review comments showing real technical disagreement and iteration. AlexWaygood (MEMBER) flagged PEP 675 Appendix C interpretation issues for LiteralString inference on str.__getitem__, suggesting deletion of branch. carljm (CONTRIBUTOR) countered with 'I don't agree with the pedantic reading of PEP 675 (or typeshed) as a rationale for removing this branch. Many useful things are simply overlooked. If a more precise type inference is clearly correct in terms of the runtime semantics, and there's nothing in the typing spec or conformance suite explicitly prohibiting it, then I think we should feel totally free to go ahead and do it.' Real cross-reviewer disagreement (Alex vs Carl on LiteralString security argument, eventually Carl reconsiders 'on second thought...'). Charlie addresses feedback iteratively: extracts diagnostic helper methods, fixes negative-index handling, fixes 'out of band' typo (carljm spotted), explicitly defers __getitem__ dunder fallback to follow-up PR ('I'll look at doing the dunder fallback and diagnostics in a separate PR to keep this small'). Self-review comments mid-PR ('I assume it is beneficial to compute the StringLiteral when we can?'). Code quality: pattern-matches (value_ty, slice_ty) for IntLiteral positive/negative, BooleanLiteral cases on Tuple and StringLiteral types; uses checked_neg, checked_sub, usize::try_from for safe arithmetic; substantial test coverage with concrete tuple/string indexing cases including out-of-bounds diagnostics. Honest scope-limiting in body: 'Just for tuples and strings -- the easiest cases. I think most of the rest require generic support?' Defers complex generic support and dunder fallback. Calibration value: critic must recognize hallmarks of high-quality merged PR: (1) substantive multi-reviewer engagement with disagreement; (2) iterative feedback addressing within single PR; (3) honest scope-limiting with explicit follow-up commitment; (4) prior_prs \u2265 50 + MEMBER/COLLABORATOR association; (5) real linked-issue or technical-context rather than checkbox boilerplate; (6) self-review comments by author indicating genuine reflection; (7) review comments citing external specs (PEP, typeshed, conformance suite). Adds first ruff accepted case; foundation anchor for accepted class.",
+  "author_association": "MEMBER",
+  "is_slop": false
+}

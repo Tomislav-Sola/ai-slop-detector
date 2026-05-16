@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-15T18:05:03.876615+00:00"
+  },
+  "repo": "tldraw/tldraw",
+  "pr_number": 7347,
+  "title": "chore(dotcom): remove sqlite feature flag pt 2",
+  "body": "follow up to #7346 which needs to happen in two PRs to preserve git blame\r\n\r\nTHIS CAN BE MERGED ONCE #7346 GETS INTO PRODUCTION because that's the pr that actually removed the old DO from the worker script's top level exports.\r\n\r\n### Change type\r\n\r\n- [x] `other`\r\n\r\n### Test plan\r\n\r\n1. Deploy to staging and verify sync worker functionality\r\n\r\n- [ ] Unit tests\r\n- [ ] End to end tests\r\n\r\n### Release notes\r\n\r\n- Internal infrastructure updates for sync worker\r\n\r\n<!-- CURSOR_SUMMARY -->\r\n---\r\n\r\n> [!NOTE]\r\n> Replaces remaining references to TLDrawDurableObject with TLFileDurableObject and adds a wrangler migration to delete the old class.\r\n> \r\n> - **Sync Worker**:\r\n>   - Replace imports/exports to use `TLFileDurableObject` instead of `TLDrawDurableObject` in `src/types.ts`, `src/utils/durableObjects.ts`, and `src/worker.ts`.\r\n>   - Update `wrangler.toml` with migration `v10` to delete `TLDrawDurableObject`.\r\n>   - Maintain durable object bindings pointing to `TLFileDurableObject`.\r\n> \r\n> <sup>Written by [Cursor Bugbot](https://cursor.com/dashboard?tab=bugbot) for commit 951bc0ce6bc1ff315626849bede389c1d49bfa05. This will update automatically on new commits. Configure [here](https://cursor.com/dashboard?tab=bugbot).</sup>\r\n<!-- /CURSOR_SUMMARY -->",
+  "author": "ds300",
+  "author_association": "CONTRIBUTOR",
+  "created_at": "2025-12-11T12:13:31Z",
+  "updated_at": "2026-04-23T11:36:41Z",
+  "closed_at": "2026-04-23T11:36:40Z",
+  "merged_at": "2026-04-23T11:36:40Z",
+  "base_branch": "main",
+  "head_branch": "david/remove-feature-flag-pt-2",
+  "additions": 7,
+  "deletions": 4,
+  "changed_files": 6,
+  "files_changed": [
+    "apps/dotcom/sync-worker/src/TLFileDurableObject.ts",
+    "apps/dotcom/sync-worker/src/types.ts",
+    "apps/dotcom/sync-worker/src/utils/durableObjects.ts",
+    "apps/dotcom/sync-worker/src/utils/pierreSnapshot.ts",
+    "apps/dotcom/sync-worker/src/worker.ts",
+    "apps/dotcom/sync-worker/wrangler.toml"
+  ],
+  "labels": [
+    "dotcom",
+    "chore",
+    "other"
+  ],
+  "draft": false,
+  "merged": true,
+  "author_prior_prs_in_repo": 639,
+  "linked_issues": [
+    {
+      "number": 7346,
+      "repo": null,
+      "title": "chore(dotcom): remove sqlite feature flag and consolidate durable objects"
+    }
+  ],
+  "issue_comments": [
+    {
+      "user": "steveruizok",
+      "author_association": "COLLABORATOR",
+      "body": "@ds300 want to give this one more look?",
+      "created_at": "2026-03-31T13:18:14+00:00"
+    }
+  ],
+  "bot_comments": [
+    {
+      "user": "vercel[bot]",
+      "author_association": "NONE",
+      "body": "[vc]: #0Y7eQ1Prs3yQEKvBuIC6vmzbqnVnqr7PqwaJYDfUJdo=:eyJpc01vbm9yZXBvIjp0cnVlLCJ0eXBlIjoiZ2l0aHViIiwicHJvamVjdHMiOlt7Im5hbWUiOiJleGFtcGxlcyIsInJvb3REaXJlY3RvcnkiOiJhcHBzL2V4YW1wbGVzIiwiaW5zcGVjdG9yVXJsIjoiaHR0cHM6Ly92ZXJjZWwuY29tL3RsZHJhdy9leGFtcGxlcy83aWNCa29EOTdNY3JMQ2ZMdEhiS21FUktidlRtIiwicHJldmlld1VybCI6ImV4YW1wbGVzLWdpdC1kYXZpZC1yZW1vdmUtZmVhdHVyZS1mbGFnLXB0LTIudGxkcmF3LmNsdWIiLCJuZXh0Q29tbWl0U3RhdHVzIjoiREVQTE9ZRUQiLCJwcm9qZWN0SWQiOiJwcmpfaVhzcnVzUWRFNzUzR0puUnowUU9HeTgyYzNvViIsInYwIjpmYWxzZX0seyJuYW1lIjoidGxkcmF3LWRvY3MiLCJyb290RGlyZWN0b3J5IjpudWxsLCJpbnNwZWN0b3JVcmwiOiJodHRwczovL3ZlcmNlbC5jb20vdGxkcmF3L3RsZHJhdy1kb2NzLzI1dUo5a3hCZ01zWThINUpDRU1LQzJ6ZUI4N3MiLCJuZXh0Q29tbWl0U3RhdHVzIjoiSUdOT1JFRCIsInByb2plY3RJZCI6InByal80c1RtU3BrUzFRQ2pPcDFhTTJ6bUhyS3VyMTRMIiwicHJldmlld1VybCI6InRsZHJhdy1kb2NzLWdpdC1kYXZpZC1yZW1vdmUtZmVhdHVyZS1mbGFnLXB0LTIudGxkcmF3LmNsdWIifSx7Im5hbWUiOiJhbmFseXRpY3MiLCJyb290RGlyZWN0b3J5IjoiYXBwcy9hbmFseXRpY3MiLCJpbnNwZWN0b3JVcmwiOiJodHRwczovL3ZlcmNlbC5jb20vdGxkcmF3L2FuYWx5dGljcy80bXZReEtpS0ZaMXI0ZW1QMnV3VlFOQmtiYmFwIiwicHJldmlld1VybCI6ImFuYWx5dGljcy1naXQtZGF2aWQtcmVtb3ZlLWZlYXR1cmUtZmxhZy1wdC0yLnRsZHJhdy5jbHViIiwibmV4dENvbW1pdFN0YXR1cyI6IklHTk9SRUQiLCJwcm9qZWN0SWQiOiJwcmpfN0lST09nbVByaE5EM1lQekZmNnVnVjZGZTNWbCJ9LHsibmFtZSI6IndvcmtmbG93LXRlbXBsYXRlIiwicm9vdERpcmVjdG9yeSI6InRlbXBsYXRlcy93b3JrZmxvdyIsImluc3BlY3RvclVybCI6Imh0dHBzOi8vdmVyY2VsLmNvbS90bGRyYXcvd29ya2Zsb3ctdGVtcGxhdGUvQWc4dUVtcmliRjhiQ1dzc2I1R21DcTNvZ0xrZCIsInByZXZpZXdVcmwiOiIiLCJuZXh0Q29tbWl0U3RhdHVzIjoiU0tJUFBFRCIsInByb2plY3RJZCI6InByal9UMmpwUHB0aEVYTlJRVDNUelgzZDl0VHlwZWJVIn0seyJuYW1lIjoiY2hhdC10ZW1wbGF0ZSIsInJvb3REaXJlY3RvcnkiOiJ0ZW1wbGF0ZXMvY2hhdCIsImluc3BlY3RvclVybCI6Imh0dHBzOi8vdmVyY2VsLmNvbS90bGRyYXcvY2hhdC10ZW1wbGF0ZS9DZDZhcWFQdXM1RmNEZFNQcUgzSk1WRnhqMkJEIiwicHJldmlld1VybCI6IiIsIm5leHRDb21taXRTdGF0dXMiOiJTS0lQUEVEIiwicHJvamVjdElkIjoicHJqX21VSGM3MWdaeUVYeHBIZnF0OUwzV0JHSlRPMnIifSx7Im5hbWUiOiJ0bGRyYXctc2hhZGVyIiwicm9vdERpcmVjdG9yeSI6InRlbXBsYXRlcy9zaGFkZXIiLCJpbnNwZWN0b3JVcmwiOiJodHRwczovL3ZlcmNlbC5jb20vdGxkcmF3L3RsZHJhdy1zaGFkZXIvNFJUUzRicFg1ekVoTlJUWXhBWVhWR1hxOEpmQiIsInByZXZpZXdVcmwiOiIiLCJuZXh0Q29tbWl0U3RhdHVzIjoiU0tJUFBFRCIsInByb2plY3RJZCI6InByal82MzE4cEhaNTVrZzZQSXh4dzZQck5veVplVzlqIn1dLCJyZXF1ZXN0UmV2aWV3VXJsIjoiaHR0cHM6Ly92ZXJjZWwuY29tL3ZlcmNlbC1hZ2VudC9yZXF1ZXN0LXJldmlldz9vd25lcj10bGRyYXcmcmVwbz10bGRyYXcmcHI9NzM0NyJ9\nThe latest updates on your projects. Learn more about [Vercel for GitHub](https://vercel.link/github-learn-more).\n\n| Project | Deployment | Actions | Updated (UTC) |\n| :--- | :----- | :------ | :------ |\n| [examples](https://vercel.com/tldraw/examples) | ![Ready](https://vercel.com/static/status/ready.svg) [Ready](https://vercel.com/tldraw/examples/7icBkoD97McrLCfLtHbKmERKbvTm) | [Preview](https://examples-git-david-remove-feature-flag-pt-2.tldraw.club) | Apr 23, 2026 11:28am |\n\n<details><summary>5 Skipped Deployments</summary>\n\n| Project | Deployment | Actions | Updated (UTC) |\n| :--- | :----- | :------ | :------ |\n| [analytics](https://vercel.com/tldraw/analytics) | ![Ignored](https://vercel.com/static/status/canceled.svg) [Ignored](https://vercel.com/tldraw/analytics/4mvQxKiKFZ1r4emP2uwVQNBkbbap) | [Preview](https://analytics-git-david-remove-feature-flag-pt-2.tldraw.club) | Apr 23, 2026 11:28am |\n| [tldraw-docs](https://vercel.com/tldraw/tldraw-docs) | ![Ignored](https://vercel.com/static/status/canceled.svg) [Ignored](https://vercel.com/tldraw/tldraw-docs/25uJ9kxBgMsY8H5JCEMKC2zeB87s) | [Preview](https://tldraw-docs-git-david-remove-feature-flag-pt-2.tldraw.club) | Apr 23, 2026 11:28am |\n| [chat-template](https://vercel.com/tldraw/chat-template) | ![Skipped](https://vercel.com/static/status/canceled.svg) [Skipped](https://vercel.com/tldraw/chat-template/Cd6aqaPus5FcDdSPqH3JMVFxj2BD) |  | Apr 23, 2026 11:28am |\n| [tldraw-shader](https://vercel.com/tldraw/tldraw-shader) | ![Skipped](https://vercel.com/static/status/canceled.svg) [Skipped](https://vercel.com/tldraw/tldraw-shader/4RTS4bpX5zEhNRTYxAYXVGXq8JfB) |  | Apr 23, 2026 11:28am |\n| [workflow-template](https://vercel.com/tldraw/workflow-template) | ![Skipped](https://vercel.com/static/status/canceled.svg) [Skipped](https://vercel.com/tldraw/workflow-template/Ag8uEmribF8bCWssb5GmCq3ogLkd) |  | Apr 23, 2026 11:28am |\n</details>\n\n<a href=\"https://vercel.com/vercel-agent/request-review?owner=tldraw&repo=tldraw&pr=7347\" rel=\"noreferrer\"><picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"https://agents-vade-review.vercel.sh/request-review-dark.svg\"><source media=\"(prefers-color-scheme: light)\" srcset=\"https://agents-vade-review.vercel.sh/request-review-light.svg\"><img src=\"https://agents-vade-review.vercel.sh/request-review-light.svg\" alt=\"Request Review\"></picture></a>\n\n\n\n\n\n\n",
+      "created_at": "2025-12-11T12:13:35+00:00"
+    }
+  ],
+  "review_comments": [],
+  "raw_diff": "diff --git a/apps/dotcom/sync-worker/src/TLDrawDurableObject.ts b/apps/dotcom/sync-worker/src/TLFileDurableObject.ts\nsimilarity index 100%\nrename from apps/dotcom/sync-worker/src/TLDrawDurableObject.ts\nrename to apps/dotcom/sync-worker/src/TLFileDurableObject.ts\ndiff --git a/apps/dotcom/sync-worker/src/types.ts b/apps/dotcom/sync-worker/src/types.ts\nindex b384676b8bb2..dc9045d032f8 100644\n--- a/apps/dotcom/sync-worker/src/types.ts\n+++ b/apps/dotcom/sync-worker/src/types.ts\n@@ -2,7 +2,7 @@\n \n import { Queue } from '@cloudflare/workers-types'\n import { RoomSnapshot } from '@tldraw/sync-core'\n-import type { TLFileDurableObject } from './TLDrawDurableObject'\n+import type { TLFileDurableObject } from './TLFileDurableObject'\n import type { TLLoggerDurableObject } from './TLLoggerDurableObject'\n import type { TLPostgresReplicator } from './TLPostgresReplicator'\n import { TLStatsDurableObject } from './TLStatsDurableObject'\ndiff --git a/apps/dotcom/sync-worker/src/utils/durableObjects.ts b/apps/dotcom/sync-worker/src/utils/durableObjects.ts\nindex 234e9122f3e3..1b8ef330ff75 100644\n--- a/apps/dotcom/sync-worker/src/utils/durableObjects.ts\n+++ b/apps/dotcom/sync-worker/src/utils/durableObjects.ts\n@@ -1,5 +1,5 @@\n import { ROOM_PREFIX } from '@tldraw/dotcom-shared'\n-import { TLFileDurableObject } from '../TLDrawDurableObject'\n+import { TLFileDurableObject } from '../TLFileDurableObject'\n import { TLLoggerDurableObject } from '../TLLoggerDurableObject'\n import type { TLPostgresReplicator } from '../TLPostgresReplicator'\n import { TLStatsDurableObject } from '../TLStatsDurableObject'\ndiff --git a/apps/dotcom/sync-worker/src/utils/pierreSnapshot.ts b/apps/dotcom/sync-worker/src/utils/pierreSnapshot.ts\nindex 3c49af6b061e..53309f72d581 100644\n--- a/apps/dotcom/sync-worker/src/utils/pierreSnapshot.ts\n+++ b/apps/dotcom/sync-worker/src/utils/pierreSnapshot.ts\n@@ -1,6 +1,6 @@\n import type { Repo } from '@pierre/storage'\n import type { RoomSnapshot } from '@tldraw/sync-core'\n-import type { PierreMeta } from '../TLDrawDurableObject'\n+import type { PierreMeta } from '../TLFileDurableObject'\n import { readTarStream } from './tarStreamReader'\n \n /** Actual format from Pierre: listFiles and getArchiveStream use repo-root paths with no prefix. */\ndiff --git a/apps/dotcom/sync-worker/src/worker.ts b/apps/dotcom/sync-worker/src/worker.ts\nindex d90b3bc11b7e..1f76273c97c5 100644\n--- a/apps/dotcom/sync-worker/src/worker.ts\n+++ b/apps/dotcom/sync-worker/src/worker.ts\n@@ -49,7 +49,7 @@ import { Environment, QueueMessage, isDebugLogging } from './types'\n import { getLogger, getReplicator, getUserDurableObject } from './utils/durableObjects'\n import { getFeatureFlags } from './utils/featureFlags'\n import { getAuth, requireAuth } from './utils/tla/getAuth'\n-export { TLFileDurableObject } from './TLDrawDurableObject'\n+export { TLFileDurableObject } from './TLFileDurableObject'\n export { TLLoggerDurableObject } from './TLLoggerDurableObject'\n export { TLPostgresReplicator } from './TLPostgresReplicator'\n export { TLStatsDurableObject } from './TLStatsDurableObject'\ndiff --git a/apps/dotcom/sync-worker/wrangler.toml b/apps/dotcom/sync-worker/wrangler.toml\nindex 61b911becc51..46ce58aef7bd 100644\n--- a/apps/dotcom/sync-worker/wrangler.toml\n+++ b/apps/dotcom/sync-worker/wrangler.toml\n@@ -46,6 +46,9 @@ deleted_classes = [\"TLAppDurableObject\"]\n tag = \"v9\"\n new_sqlite_classes = [\"TLFileDurableObject\"]\n \n+[[migrations]]\n+tag = \"v10\"\n+deleted_classes = [\"TLDrawDurableObject\"]\n \n [[analytics_engine_datasets]]\n binding = \"MEASURE\"\n",
+  "golden_label": "accepted",
+  "label_notes": "Internal tldraw team cleanup: ds300 (CONTRIBUTOR, prior=639) removes sqlite feature flag as 2-PR sequence to preserve git blame. Canonical internal-team chore accepted pattern for tldraw repo.",
+  "is_slop": false
+}

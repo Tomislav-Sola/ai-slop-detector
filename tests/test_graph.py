@@ -10,10 +10,12 @@ import pytest
 from pr_triage.claude_client import ClaudeClient
 from pr_triage.graph.nodes import (
     _is_trivial,
+    architecture_critic_node,
     classify_size_node,
     emit_verdict_node,
     guidelines_critic_node,
     retrieve_context_node,
+    slop_signals_critic_node,
 )
 from pr_triage.graph.pipeline import _check_budget, run_pipeline
 from pr_triage.budget import BudgetExceeded
@@ -201,20 +203,52 @@ def test_guidelines_critic_strips_markdown_fences():
     assert result["critic_outputs"][0].details.score == 7
 
 
+def test_guidelines_critic_recovers_from_prose_before_json():
+    """Haiku sometimes emits a prose preamble before the JSON object."""
+    noisy = "Here is my assessment:\n\n" + _CRITIC_JSON + "\n\nThanks!"
+    s = _make_state(rag_chunks=[])
+    result = guidelines_critic_node(s, _fake_client(noisy))
+    assert result["critic_outputs"][0].details.score == 7
+
+
+def test_guidelines_critic_recovers_from_invalid_backslash_escape():
+    """Critics sometimes emit raw \\x or \\d inside evidence quotes, which is invalid JSON."""
+    bad = '{"score": 4, "findings": [{"severity":"major","category":"regex","evidence":"matches \\d+ pattern"}], "citations": []}'
+    s = _make_state(rag_chunks=[])
+    result = guidelines_critic_node(s, _fake_client(bad))
+    assert result["critic_outputs"][0].details.score == 4
+
+
+def test_guidelines_critic_coerces_dict_citations():
+    """Haiku invents a richer citations schema: list of dicts instead of list of strings."""
+    rich = json.dumps({
+        "score": 6,
+        "findings": [],
+        "citations": [{"type": "evidence", "text": "CONTRIBUTING.md line 42"}],
+    })
+    s = _make_state(rag_chunks=[])
+    result = guidelines_critic_node(s, _fake_client(rich))
+    citations = result["critic_outputs"][0].details.citations
+    assert citations == ["CONTRIBUTING.md line 42"]
+
+
 # ------------------------------------------------------------------
 # emit_verdict_node
 # ------------------------------------------------------------------
 
-def test_emit_verdict_trivial():
-    s = _make_state(size_classification="trivial")
-    result = emit_verdict_node(s)
-    assert result["aggregate_verdict"].decision == "approve"
-
-
 def test_emit_verdict_no_critics():
+    """Binary aggregator: no critic output → default to reject (flag for review)."""
     s = _make_state(size_classification="medium")
     result = emit_verdict_node(s)
-    assert result["aggregate_verdict"].decision == "request_changes"
+    assert result["aggregate_verdict"].decision == "reject"
+
+
+def test_emit_verdict_trivial_goes_through_critics():
+    # Trivial PRs no longer auto-approve — they run critics like any other PR.
+    # With no critics present, the binary aggregator defaults to reject.
+    s = _make_state(size_classification="trivial")
+    result = emit_verdict_node(s)
+    assert result["aggregate_verdict"].decision == "reject"
 
 
 # ------------------------------------------------------------------
@@ -275,17 +309,117 @@ def test_e2e_papertriage_pr9_key_fields():
 
     result = run_pipeline(state, client, rag, max_tokens=50_000)
 
-    # Key-field assertions (not an exact snapshot — survives prompt tweaks)
+    # Key-field assertions (not an exact snapshot — survives prompt tweaks).
+    # Binary pipeline: two critics, two decision classes.
     assert result.size_classification in {"small", "medium", "large", "trivial"}
     assert result.aggregate_verdict is not None
-    assert result.aggregate_verdict.decision in {"approve", "request_changes", "reject"}
+    assert result.aggregate_verdict.decision in {"approve", "reject"}
 
     if result.size_classification != "trivial":
-        assert len(result.critic_outputs) == 1
-        guidelines = result.critic_outputs[0]
-        assert guidelines.critic_name == "guidelines_critic"
-        assert guidelines.details is not None
-        assert 0 <= guidelines.details.score <= 10
-        assert isinstance(guidelines.details.findings, list)
-        assert len(guidelines.details.findings) > 0
-        assert all(isinstance(c, str) for c in guidelines.details.citations)
+        assert len(result.critic_outputs) == 2
+        critic_names = {c.critic_name for c in result.critic_outputs}
+        assert "architecture_critic" in critic_names
+        assert "slop_signals_critic" in critic_names
+        arch = next(c for c in result.critic_outputs if c.critic_name == "architecture_critic")
+        assert arch.details is not None
+        assert 0 <= arch.details.score <= 10
+        assert isinstance(arch.details.findings, list)
+        assert all(isinstance(c, str) for c in arch.details.citations)
+
+
+# ------------------------------------------------------------------
+# architecture_critic_node (B1)
+# ------------------------------------------------------------------
+
+_ARCH_JSON = json.dumps({
+    "score": 5,
+    "findings": [{"severity": "minor", "category": "abstraction", "evidence": "new class for trivial change"}],
+    "citations": [],
+})
+
+
+def test_architecture_critic_sets_name():
+    s = _make_state(rag_chunks=["[chunk-0] Follow existing patterns"])
+    client = _fake_client(_ARCH_JSON)
+    result = architecture_critic_node(s, client)
+    output = result["critic_outputs"][0]
+    assert output.critic_name == "architecture_critic"
+    assert output.details.score == 5
+
+
+def test_architecture_critic_verdict_pass():
+    high = json.dumps({"score": 9, "findings": [], "citations": []})
+    s = _make_state()
+    result = architecture_critic_node(s, _fake_client(high))
+    assert result["critic_outputs"][0].verdict == "pass"
+
+
+def test_architecture_critic_verdict_fail():
+    low = json.dumps({"score": 2, "findings": [], "citations": []})
+    s = _make_state()
+    result = architecture_critic_node(s, _fake_client(low))
+    assert result["critic_outputs"][0].verdict == "fail"
+
+
+# ------------------------------------------------------------------
+# slop_signals_critic_node (B2)
+# ------------------------------------------------------------------
+
+_SLOP_JSON = json.dumps({
+    "score": 3,
+    "findings": [{"severity": "major", "category": "slop", "evidence": "generic boilerplate detected"}],
+    "citations": [],
+})
+
+
+def test_slop_signals_critic_sets_name():
+    s = _make_state()
+    client = _fake_client(_SLOP_JSON)
+    result = slop_signals_critic_node(s, client)
+    output = result["critic_outputs"][0]
+    assert output.critic_name == "slop_signals_critic"
+    assert output.details.score == 3
+
+
+def test_slop_signals_critic_populates_features():
+    s = _make_state()
+    result = slop_signals_critic_node(s, _fake_client(_SLOP_JSON))
+    assert result.get("sloppiness_features") is not None
+
+
+def test_slop_signals_critic_detects_debug_prints():
+    diff_with_print = (
+        "diff --git a/foo.py b/foo.py\n"
+        "+print('debug value:', x)\n"
+        "+print('another debug')\n"
+    )
+    s = _make_state(raw_diff=diff_with_print)
+    from pr_triage.graph.nodes import _compute_sloppiness_features
+    features = _compute_sloppiness_features(s)
+    assert features.debug_print_count == 2
+
+
+def test_slop_signals_critic_detects_todo():
+    diff = "+# TODO: fix this later\n+# FIXME: hack alert\n"
+    from pr_triage.graph.nodes import _compute_sloppiness_features
+    s = _make_state(raw_diff=diff)
+    features = _compute_sloppiness_features(s)
+    assert features.todo_fixme_count == 2
+
+
+# ------------------------------------------------------------------
+# aggregate_node (B4)
+# ------------------------------------------------------------------
+
+def test_aggregate_node_sets_both_fields():
+    from pr_triage.graph.nodes import aggregate_node
+    from pr_triage.state import CriticOutput, GuidelinesCriticOutput
+    details = GuidelinesCriticOutput(score=8, findings=[], citations=[])
+    critic = CriticOutput(
+        critic_name="guidelines_critic", verdict="pass",
+        reasoning="ok", confidence=0.8, details=details,
+    )
+    s = _make_state(size_classification="medium", critic_outputs=[critic])
+    result = aggregate_node(s)
+    assert "aggregate_verdict" in result
+    assert "aggregate_result" in result

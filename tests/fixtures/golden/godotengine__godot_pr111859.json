@@ -1,0 +1,108 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-15T17:28:42.968506+00:00"
+  },
+  "repo": "godotengine/godot",
+  "pr_number": 111859,
+  "title": "Fix TextEdit IME error on mouse over",
+  "body": "- Fixes hovering over a line with IME text causing errors `ERROR: scene/gui/text_edit.cpp:6402 - Condition \"p_column > text[p_line].length()\" is true. Returning: 0`\r\n- Fixes search highlight being offset when there is IME text before it\r\n- Fixes minimap not being correct when using IME (wrapped lines were messed up)\r\n- Fixes (maybe) https://github.com/godotengine/godot/issues/110316 - I'm not sure if this is the same issue or not\r\n- Supersedes https://github.com/godotengine/godot/pull/110787 since that fixes the mouse over issue\r\n\t- But I don't think it actually fixes () https://github.com/godotengine/godot/issues/110138 since that describes Chinese IME specific issues and does not mention mouse movement.\r\n\r\nFixed `get_line_wrap_index_at_column` not accepting column with IME. \r\n`get_line_wrapped_text` used `text.get_line_wrap_ranges` which uses `data_buf` for the line wraps, which is uses IME text. So it was using the non-IME text string with IME line wraps, which was causing the minimap and search highlight issues.\r\nAlso made `get_line_wrap_index_at_column` use the `get_line_wrap_ranges` directly, it doesn't need to get the text first.\r\n\r\nThere are lots more issues with IME here, anything using the TextServer or `data_buf` is using the text with the IME, but some functions use those together with things that don't use the IME text, like the carets, selections, and text strings. Such as `get_rect_at_line_column`, `get_word`, most places that use `get_line_column_at_pos`, and more.\r\n\r\nSearch highlight issue (with an open find panel):\r\n\r\n<img width=\"275\" height=\"69\" alt=\"Pasted image 20251020153030\" src=\"https://github.com/user-attachments/assets/4d91c30b-1ed2-4c90-b279-d80953fd55ea\" />\r\n",
+  "author": "kitbdev",
+  "author_association": "CONTRIBUTOR",
+  "created_at": "2025-10-20T21:56:39Z",
+  "updated_at": "2026-05-14T14:59:40Z",
+  "closed_at": "2026-01-26T19:20:00Z",
+  "merged_at": "2026-01-26T19:20:00Z",
+  "base_branch": "master",
+  "head_branch": "fix_te_ime_wrap_index_error",
+  "additions": 12,
+  "deletions": 15,
+  "changed_files": 1,
+  "files_changed": [
+    "scene/gui/text_edit.cpp"
+  ],
+  "labels": [
+    "bug",
+    "topic:gui"
+  ],
+  "draft": false,
+  "merged": true,
+  "author_prior_prs_in_repo": 172,
+  "linked_issues": [
+    {
+      "number": 110316,
+      "repo": null,
+      "title": "[4.5] Script Editor popup error when using <Microsoft Input Method>"
+    },
+    {
+      "number": 110138,
+      "repo": null,
+      "title": "IME preedit apostrophe (U+0027) leaks into committed text \u2192 multiple regressions in editor since 4.3/4.4 (TextEdit caret error; Find-in-Files desync; apostrophes between letters)"
+    }
+  ],
+  "issue_comments": [
+    {
+      "user": "Jiayibingping",
+      "author_association": "NONE",
+      "body": "Sorry I test the pr but it still  causes errors on Windows 11 (Microsoft Pinyin IME)\r\n `ERROR: scene\\gui\\text_edit.cpp:4971 - Index p_column = 4 is out of bounds (text_line.size() + 1 = 4). when hovering a line with IME text `\r\n\r\n<img width=\"2829\" height=\"668\" alt=\"image\" src=\"https://github.com/user-attachments/assets/d4833fa7-1903-443b-ab8f-2d2332c72bfe\" />\r\n \r\n\r\nhttps://github.com/user-attachments/assets/33fe0f23-4a9e-414e-8c8d-17b75d4cb63f\r\n\r\n\r\nthe case\u2462 of #110138 ",
+      "created_at": "2025-10-21T07:51:20+00:00"
+    },
+    {
+      "user": "Jiayibingping",
+      "author_association": "NONE",
+      "body": "more details base on testing for the pr :\r\n\r\nhttps://github.com/user-attachments/assets/29262d37-7de2-4588-9d58-02239001c043\r\n\r\nit shows case\u2460  case\u2461  case\u2462 for #110138  and #103180 and maybe the same isuue for #81990 ",
+      "created_at": "2025-10-21T09:31:58+00:00"
+    },
+    {
+      "user": "kitbdev",
+      "author_association": "CONTRIBUTOR",
+      "body": "It looks that issue happens in `TextEdit::get_word` and it occurs with other language IMEs as well when it tries to lookup the word for the symbol tooltip. To reproduce with other languages, have the IME at multiple carets so it doesn't block the text and hover or ctrl hover over one of them.\r\nIt is more easily reproducible with the Chinese IME because it doesn't block the current line from receiving mouse input.\r\n\r\nFixed it in a similar way, `get_word` now uses IME text consistently and accepts column with IME.",
+      "created_at": "2025-10-21T21:49:48+00:00"
+    },
+    {
+      "user": "Jiayibingping",
+      "author_association": "NONE",
+      "body": "Hi @bruvzg, just wondering whether this is still planned to be merged for 4.6. Thanks!",
+      "created_at": "2026-01-15T06:29:33+00:00"
+    },
+    {
+      "user": "Repiteo",
+      "author_association": "CONTRIBUTOR",
+      "body": "Thanks!",
+      "created_at": "2026-01-26T19:20:38+00:00"
+    },
+    {
+      "user": "Repiteo",
+      "author_association": "CONTRIBUTOR",
+      "body": "Cherry-picked for 4.6.3.",
+      "created_at": "2026-05-14T14:58:45+00:00"
+    }
+  ],
+  "bot_comments": [],
+  "review_comments": [
+    {
+      "user": "bruvzg",
+      "author_association": "MEMBER",
+      "body": "`get_line_wrap_ranges` always uses non-ime text buffer, so mixing it with `text.get_text_with_ime` for column range won't fully work. There are some other places it is mixed as well.",
+      "created_at": "2026-01-15T08:29:01+00:00",
+      "path": "scene/gui/text_edit.cpp"
+    },
+    {
+      "user": "kitbdev",
+      "author_association": "CONTRIBUTOR",
+      "body": "`get_line_wrap_ranges` uses `data_buf`, which is does use IME.\r\nThere are some other mixed up places in TextEdit, but I don't think this is one of them and those would take more effort to fix.",
+      "created_at": "2026-01-15T16:53:53+00:00",
+      "path": "scene/gui/text_edit.cpp"
+    },
+    {
+      "user": "bruvzg",
+      "author_association": "MEMBER",
+      "body": "Indeed, I mixed it up, there's only one `data_buf`, so it should be fine.",
+      "created_at": "2026-01-15T17:05:23+00:00",
+      "path": "scene/gui/text_edit.cpp"
+    }
+  ],
+  "raw_diff": "diff --git a/scene/gui/text_edit.cpp b/scene/gui/text_edit.cpp\nindex f97c217e64f4..c7530e5eb455 100644\n--- a/scene/gui/text_edit.cpp\n+++ b/scene/gui/text_edit.cpp\n@@ -4974,7 +4974,7 @@ String TextEdit::get_word(int p_line, int p_column) const {\n \t}\n \tERR_FAIL_INDEX_V(p_line, text.size(), String());\n \n-\tconst String &text_line = text[p_line];\n+\tconst String &text_line = text.get_text_with_ime(p_line);\n \tif (text_line.is_empty()) {\n \t\treturn String();\n \t}\n@@ -6386,24 +6386,20 @@ int TextEdit::get_line_wrap_count(int p_line) const {\n int TextEdit::get_line_wrap_index_at_column(int p_line, int p_column) const {\n \tERR_FAIL_INDEX_V(p_line, text.size(), 0);\n \tERR_FAIL_COND_V(p_column < 0, 0);\n-\tERR_FAIL_COND_V(p_column > text[p_line].length(), 0);\n+\tERR_FAIL_COND_V(p_column > text.get_text_with_ime(p_line).length(), 0);\n \n \tif (!is_line_wrapped(p_line)) {\n \t\treturn 0;\n \t}\n \n-\t/* Loop through wraps in the line text until we get to the column. */\n-\tint wrap_index = 0;\n-\tint col = 0;\n-\tVector<String> lines = get_line_wrapped_text(p_line);\n-\tfor (int i = 0; i < lines.size(); i++) {\n-\t\twrap_index = i;\n-\t\tcol += lines[wrap_index].length();\n-\t\tif (col > p_column) {\n-\t\t\tbreak;\n+\t// Loop through wraps in the line text until we get to the column.\n+\tconst Vector<Vector2i> line_ranges = text.get_line_wrap_ranges(p_line);\n+\tfor (int i = 0; i < line_ranges.size(); i++) {\n+\t\tif (line_ranges[i].y > p_column) {\n+\t\t\treturn i;\n \t\t}\n \t}\n-\treturn wrap_index;\n+\treturn line_ranges.is_empty() ? 0 : line_ranges.size() - 1;\n }\n \n Vector<String> TextEdit::get_line_wrapped_text(int p_line) const {\n@@ -6411,12 +6407,13 @@ Vector<String> TextEdit::get_line_wrapped_text(int p_line) const {\n \n \tVector<String> lines;\n \tif (!is_line_wrapped(p_line)) {\n-\t\tlines.push_back(text[p_line]);\n+\t\tlines.push_back(text.get_text_with_ime(p_line));\n \t\treturn lines;\n \t}\n \n-\tconst String &line_text = text[p_line];\n-\tVector<Vector2i> line_ranges = text.get_line_wrap_ranges(p_line);\n+\tconst String &line_text = text.get_text_with_ime(p_line);\n+\tconst Vector<Vector2i> line_ranges = text.get_line_wrap_ranges(p_line);\n+\tlines.reserve(line_ranges.size());\n \tfor (int i = 0; i < line_ranges.size(); i++) {\n \t\tlines.push_back(line_text.substr(line_ranges[i].x, line_ranges[i].y - line_ranges[i].x));\n \t}\n",
+  "golden_label": "accepted",
+  "label_notes": "TextEdit IME triple-bug fix (mouse-hover error, search highlight offset, minimap). kitbdev (CONTRIBUTOR, prior=172) iterated with reviewer on IME text buffer mixing semantics.",
+  "is_slop": false
+}

@@ -1,0 +1,51 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:23:09.451693+00:00"
+  },
+  "repo": "astral-sh/ruff",
+  "pr_number": 13596,
+  "title": "Use `__class_getitem__` for more specific non-subscript errors",
+  "body": null,
+  "author": "charliermarsh",
+  "created_at": "2024-10-01T18:11:43Z",
+  "updated_at": "2026-05-11T01:52:00Z",
+  "closed_at": "2024-10-01T18:16:00Z",
+  "merged_at": "2024-10-01T18:16:00Z",
+  "base_branch": "main",
+  "head_branch": "charlie/cgi",
+  "additions": 34,
+  "deletions": 3,
+  "changed_files": 1,
+  "files_changed": [
+    "crates/red_knot_python_semantic/src/types/infer.rs"
+  ],
+  "labels": [
+    "ty"
+  ],
+  "draft": false,
+  "merged": true,
+  "author_prior_prs_in_repo": 999,
+  "linked_issues": [],
+  "issue_comments": [
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "...It could be that the metaclass has (or doesn't have) a `__getitem__` method, of course. (Example: `enum.Enum`.) But hey, red-knot doesn't know anything about metaclasses yet, really \ud83d\ude06 we can cross that bridge when we come to it ",
+      "created_at": "2024-10-01T18:18:20+00:00"
+    }
+  ],
+  "bot_comments": [
+    {
+      "user": "github-actions[bot]",
+      "author_association": "CONTRIBUTOR",
+      "body": "<!-- generated-comment ecosystem -->\n## `ruff-ecosystem` results\n### Linter (stable)\n\u2705 ecosystem check detected no linter changes.\n\n### Linter (preview)\n\u2705 ecosystem check detected no linter changes.\n\n\n",
+      "created_at": "2024-10-01T18:25:19+00:00"
+    }
+  ],
+  "review_comments": [],
+  "raw_diff": "diff --git a/crates/red_knot_python_semantic/src/types/infer.rs b/crates/red_knot_python_semantic/src/types/infer.rs\nindex b8b529865ff409..ed25acfafb8d62 100644\n--- a/crates/red_knot_python_semantic/src/types/infer.rs\n+++ b/crates/red_knot_python_semantic/src/types/infer.rs\n@@ -1327,12 +1327,13 @@ impl<'db> TypeInferenceBuilder<'db> {\n         &mut self,\n         node: AnyNodeRef,\n         non_subscriptable_ty: Type<'db>,\n+        method: &str,\n     ) {\n         self.add_diagnostic(\n             node,\n             \"non-subscriptable\",\n             format_args!(\n-                \"Cannot subscript object of type '{}' with no `__getitem__` method.\",\n+                \"Cannot subscript object of type '{}' with no `{method}` method.\",\n                 non_subscriptable_ty.display(self.db)\n             ),\n         );\n@@ -2627,10 +2628,16 @@ impl<'db> TypeInferenceBuilder<'db> {\n                             .call(self.db, &[slice_ty])\n                             .unwrap_with_diagnostic(self.db, value.as_ref().into(), self);\n                     }\n+\n+                    self.non_subscriptable_diagnostic(\n+                        (&**value).into(),\n+                        value_ty,\n+                        \"__class_getitem__\",\n+                    );\n+                } else {\n+                    self.non_subscriptable_diagnostic((&**value).into(), value_ty, \"__getitem__\");\n                 }\n \n-                // Otherwise, emit a diagnostic.\n-                self.non_subscriptable_diagnostic((&**value).into(), value_ty);\n                 Type::Unknown\n             }\n         }\n@@ -6791,6 +6798,30 @@ mod tests {\n         Ok(())\n     }\n \n+    #[test]\n+    fn subscript_class_getitem_unbound() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                class NotSubscriptable:\n+                    pass\n+\n+                a = NotSubscriptable[0]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"Unknown\");\n+        assert_file_diagnostics(\n+            &db,\n+            \"/src/a.py\",\n+            &[\"Cannot subscript object of type 'Literal[NotSubscriptable]' with no `__class_getitem__` method.\"],\n+        );\n+\n+        Ok(())\n+    }\n+\n     #[test]\n     fn subscript_not_callable_getitem() -> anyhow::Result<()> {\n         let mut db = setup_db();\n",
+  "golden_label": "accepted",
+  "label_notes": "Fourth charliermarsh/ruff accepted case \u2014 founder-self-merge-rapid-followup sub-pattern. HARD CEILING REACHED for charliermarsh+ruff accepted concentration. charliermarsh (prior_prs=999, MEMBER, Astral co-founder) submitted +34/-3 PR at 18:11, self-merged at 18:16 \u2014 4 minutes 17 seconds open-to-merge with zero pre-merge review comments and empty body (only title: 'Use class_getitem for more specific non-subscript errors'). Implements carljm's nicht-kritische suggestion from #13579: 'perhaps our not subscriptable diagnostic should mention class_getitem instead of getitem if Type::is_class is true' \u2014 direct fulfillment of post-PR review note. Code quality is correct and minimal: adds method: &str parameter to existing non_subscriptable_diagnostic helper, branch logic at call site, one regression test. Post-merge engagement only: AlexWaygood drops informal observation after merge ('It could be that the metaclass has (or doesn't have) a getitem method... But hey, red-knot doesn't know anything about metaclasses yet'). Same-day rapid-iteration context: this is charlie's 4th substantive red_knot type-inference PR in the 22-hour window from Sep 30 20:50 to Oct 1 18:16. CRITICAL CALIBRATION WARNING: this sub-pattern (founder-self-merge + empty-body + <5min open-to-merge + zero-review-comments) is dangerously close to slop signature for non-founder PRs. Critic MUST NOT learn 'no review + empty body + sub-5min merge = accepted' as general heuristic. Accepted status here derives from: (1) author project-ownership authority (prior_prs=999, founder); (2) follow-up implementing reviewed-suggestion from prior PR; (3) repo-internal team velocity context (multiple parallel founder PRs same day); (4) minimal-correct code. For external/first-time contributors, the same signal profile (empty body + zero review + rapid self-merge) would be slop. Sub-pattern label: 'founder-authority self-merge of reviewed-suggestion follow-up'. Distinguishes from #13562 (collaborative-quality merge), #13579 (review-driven debugging merge), #13580 (small-straightforward-with-review merge). HARD CEILING ENFORCED: NO further charliermarsh+ruff accepted cases unless completely new sub-pattern (e.g., contested merge with maintainer disagreement, cross-team external collaboration, RFC-style architectural decision). NO further ruff accepted cases unless from completely different author. Next accepted targets MUST diversify by author AND repo. Critical anchor targets remain: HA#160608 (farkasdi successful split-merge), ghostty#12518 (disclosed-AI merge), and 16+ diverse cases from godot, curl, poetry, pydantic, tldraw, ghostty merged sets.",
+  "author_association": "MEMBER",
+  "is_slop": false
+}

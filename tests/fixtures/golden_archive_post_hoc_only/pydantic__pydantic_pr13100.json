@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-15T17:55:03.538280+00:00"
+  },
+  "repo": "pydantic/pydantic",
+  "pr_number": 13100,
+  "title": "Fix `__pydantic_extra__` ignored if `extra = 'forbid'` at model level, overridden at runtime",
+  "body": "## Summary\n\nFixes #13024\n\nWhen a model has `extra='forbid'` but `__pydantic_extra__` is annotated with a type hint (e.g. `dict[str, int]`), and `extra='allow'` is passed at runtime via `model_validate()`, the type hint was being ignored.\n\n## Root Cause\n\nIn `_generate_schema.py`, the `extras_schema` was only generated when `core_config.get('extra_fields_behavior') == 'allow'`. When the model's config had `extra='forbid'`, the extras schema was never built, so when `extra='allow'` was passed at runtime, extra fields were accepted without type validation.\n\n## Changes\n\n### pydantic (this PR)\n- **`pydantic/_internal/_generate_schema.py`**: Generate `extras_schema` whenever `__pydantic_extra__` is annotated, regardless of config-level `extra` setting\n- **`tests/test_main.py`**: Added test `test_pydantic_extra_type_respected_with_runtime_extra_override` verifying that `__pydantic_extra__` type hints are respected with runtime extra override\n\n### pydantic-core (companion change needed)\nThis fix also requires a corresponding change in pydantic-core to accept `extras_schema` regardless of the `extra_fields_behavior` config setting. Currently pydantic-core rejects `extras_schema` unless `extra_behavior=allow`.",
+  "author": "wakidu3",
+  "author_association": "NONE",
+  "created_at": "2026-04-20T19:40:32Z",
+  "updated_at": "2026-04-20T19:41:30Z",
+  "closed_at": "2026-04-20T19:41:30Z",
+  "merged_at": null,
+  "base_branch": "main",
+  "head_branch": "fix/pydantic-extra-runtime-override-13024",
+  "additions": 21,
+  "deletions": 1,
+  "changed_files": 2,
+  "files_changed": [
+    "pydantic/_internal/_generate_schema.py",
+    "tests/test_main.py"
+  ],
+  "labels": [],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 1,
+  "linked_issues": [
+    {
+      "number": 13024,
+      "repo": null,
+      "title": "`__pydantic_extra__` ignored if `extra = 'forbid'` at model level, overridden at runtime"
+    }
+  ],
+  "issue_comments": [],
+  "bot_comments": [],
+  "review_comments": [],
+  "raw_diff": "diff --git a/pydantic/_internal/_generate_schema.py b/pydantic/_internal/_generate_schema.py\nindex aa144a80a77..ab3d1fd5271 100644\n--- a/pydantic/_internal/_generate_schema.py\n+++ b/pydantic/_internal/_generate_schema.py\n@@ -818,7 +818,7 @@ def _model_schema(self, cls: type[BaseModel]) -> core_schema.CoreSchema:\n \n                 extras_schema = None\n                 extras_keys_schema = None\n-                if core_config.get('extra_fields_behavior') == 'allow' and extra_info is not None:\n+                if extra_info is not None:\n                     tp = get_origin(extra_info.annotation)\n                     if tp not in DICT_TYPES:\n                         raise PydanticSchemaGenerationError(\ndiff --git a/tests/test_main.py b/tests/test_main.py\nindex d8ac7928110..0871671c287 100644\n--- a/tests/test_main.py\n+++ b/tests/test_main.py\n@@ -2862,6 +2862,26 @@ class MyModel(BaseModel, extra='allow'):\n     assert MyModel.model_validate({'a': 1}) == MyModel.model_validate({'a': 1}, extra='forbid')\n \n \n+def test_pydantic_extra_type_respected_with_runtime_extra_override() -> None:\n+    \"\"\"https://github.com/pydantic/pydantic/issues/13024\"\"\"\n+\n+    class A(BaseModel, extra='forbid'):\n+        __pydantic_extra__: dict[str, int]\n+        a: int\n+\n+    # When extra='allow' is passed at runtime, __pydantic_extra__ type hint should be respected\n+    a = A.model_validate({'a': 1, 'b': 2}, extra='allow')\n+    assert a.a == 1\n+    assert a.model_extra == {'b': 2}\n+\n+    # 'test' is not an int, so this should fail validation\n+    with pytest.raises(ValidationError) as exc_info:\n+        A.model_validate({'a': 1, 'b': 'test'}, extra='allow')\n+    assert exc_info.value.error_count() == 1\n+    assert exc_info.value.errors(include_url=False)[0]['type'] == 'int_parsing'\n+    assert exc_info.value.errors(include_url=False)[0]['loc'] == ('b',)\n+\n+\n def test_equality_delegation():\n     from unittest.mock import ANY\n \n",
+  "golden_label": "slop",
+  "label_notes": "58-second closure smoking gun \u2014 physically impossible for human maintainer review of 21-line pydantic internals fix. Same author (wakidu3) as #13106 which was their v2 attempt at same bug (#13024) the next day. V1-of-v2-resubmit pattern parallels ItzJustNett #13102/#13103. Body mentions 'pydantic-core companion change needed' without making it \u2014 same architectural misunderstanding that led to #13106's silent close. Classic AI-assisted silent-slop with auto-close response.",
+  "is_slop": true
+}

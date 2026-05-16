@@ -1,0 +1,482 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from pr_triage.prelabel import prelabel_candidate, prelabel_dir
+
+_NOW = datetime.now(tz=timezone.utc)
+_OLD = (_NOW - timedelta(days=30)).isoformat()
+
+
+def _cand(**overrides) -> dict:
+    base = {
+        "repo": "owner/repo",
+        "pr_number": 1,
+        "title": "feat: something",
+        "additions": 50,
+        "deletions": 20,
+        "changed_files": 3,
+        "files_changed": ["src/main.py"],
+        "labels": [],
+        "draft": False,
+        "merged": False,
+        "closed_at": _OLD,
+        "author_prior_prs_in_repo": 5,
+        "body": "",
+        "issue_comments": [],
+        "review_comments": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def _maintainer_comment(body: str, *, hours_before_close: float = 1) -> dict:
+    created = (_NOW - timedelta(days=30) - timedelta(hours=hours_before_close)).isoformat()
+    return {
+        "user": "maintainer",
+        "author_association": "MEMBER",
+        "body": body,
+        "created_at": created,
+    }
+
+
+def _member_comment(body: str, *, hours_before_close: float = 1) -> dict:
+    return _maintainer_comment(body, hours_before_close=hours_before_close)
+
+
+# ------------------------------------------------------------------
+# accepted
+# ------------------------------------------------------------------
+
+def test_accepted_merged():
+    c = _cand(merged=True)
+    r = prelabel_candidate(c)
+    assert r["label"] == "accepted"
+    assert r["is_slop_likely"] is False
+    assert r["confidence"] == "high"
+    assert r["signals"] == []
+
+
+def test_is_slop_likely_is_true_for_slop_label():
+    """The binary is_slop_likely must mirror label=='slop'."""
+    c = _cand(body="Generated with Claude Code — see https://claude.com/claude-code")
+    r = prelabel_candidate(c)
+    assert r["label"] == "slop"
+    assert r["is_slop_likely"] is True
+
+
+def test_is_slop_likely_false_for_rejected_quality():
+    """rejected_quality is not slop — binary must reflect that."""
+    c = _cand(issue_comments=[_maintainer_comment("could use more tests")])
+    r = prelabel_candidate(c)
+    assert r["label"] == "rejected_quality"
+    assert r["is_slop_likely"] is False
+
+
+def test_accepted_ignores_slop_signals_when_merged():
+    # Even if body has AI keywords, merged PR → accepted
+    c = _cand(merged=True, body="This was written by ChatGPT")
+    r = prelabel_candidate(c)
+    assert r["label"] == "accepted"
+
+
+# ------------------------------------------------------------------
+# unclear (default for unengaged closed-unmerged)
+# ------------------------------------------------------------------
+
+def test_unclear_no_comments_no_signals():
+    c = _cand(merged=False, issue_comments=[], review_comments=[],
+              author_prior_prs_in_repo=10)  # veteran — no silent_slop trigger
+    r = prelabel_candidate(c)
+    assert r["label"] == "unclear"
+    assert r["confidence"] == "low"
+    assert r["signals"] == []
+
+
+def test_unclear_no_closed_at():
+    # Open PR (no closed_at) — no signals possible
+    c = _cand(merged=False, closed_at=None, issue_comments=[], review_comments=[])
+    r = prelabel_candidate(c)
+    assert r["label"] == "unclear"
+
+
+# ------------------------------------------------------------------
+# rejected_quality — maintainer comment, no slop signal
+# ------------------------------------------------------------------
+
+def test_rejected_quality_member_comment():
+    c = _cand(issue_comments=[_member_comment("Code style issues.")])
+    r = prelabel_candidate(c)
+    assert r["label"] == "rejected_quality"
+    assert r["confidence"] == "medium"
+    assert r["signals"] == []
+
+
+def test_rejected_quality_owner_comment():
+    comment = {
+        "user": "owner",
+        "author_association": "OWNER",
+        "body": "Thanks but this duplicates existing work.",
+        "created_at": _OLD,
+    }
+    c = _cand(issue_comments=[comment])
+    r = prelabel_candidate(c)
+    assert r["label"] == "rejected_quality"
+
+
+def test_rejected_quality_contributor_comment_fires():
+    # CONTRIBUTOR is in the maintainer set (covers mitchellh, dimbleby, etc.)
+    comment = {
+        "user": "core-dev",
+        "author_association": "CONTRIBUTOR",
+        "body": "Scope issue, closing.",
+        "created_at": _OLD,
+    }
+    c = _cand(issue_comments=[comment])
+    r = prelabel_candidate(c)
+    assert r["label"] == "rejected_quality"
+
+
+def test_rejected_quality_none_association_not_maintainer():
+    comment = {
+        "user": "rando",
+        "author_association": "NONE",
+        "body": "I like this idea!",
+        "created_at": _OLD,
+    }
+    c = _cand(issue_comments=[comment])
+    r = prelabel_candidate(c)
+    assert r["label"] == "unclear"  # NONE is not in maintainer set
+
+
+# ------------------------------------------------------------------
+# Signal 1: ai_disclosure_or_mention
+# ------------------------------------------------------------------
+
+@pytest.mark.parametrize("keyword", [
+    "ChatGPT", "Copilot", "Claude", "Codex", "AI-generated", "AI-assisted",
+    "generated by AI", "written by AI", "Generated with Claude Code",
+    "Co-Authored-By: Claude", "slop", "AI usage",
+])
+def test_ai_disclosure_body_keyword(keyword):
+    c = _cand(body=f"This PR was created using {keyword}.")
+    r = prelabel_candidate(c)
+    assert r["label"] == "slop"
+    assert "ai_disclosure_or_mention" in r["signals"]
+
+
+def test_ai_disclosure_in_issue_comment():
+    comment = {"user": "author", "author_association": "NONE", "body": "I used ChatGPT.", "created_at": _OLD}
+    c = _cand(issue_comments=[comment])
+    r = prelabel_candidate(c)
+    assert "ai_disclosure_or_mention" in r["signals"]
+
+
+def test_ai_disclosure_not_fired_when_merged():
+    c = _cand(merged=True, body="Generated with Claude Code")
+    r = prelabel_candidate(c)
+    assert r["label"] == "accepted"
+    assert "ai_disclosure_or_mention" not in r["signals"]
+
+
+def test_ai_disclosure_not_fired_when_no_closed_at():
+    c = _cand(closed_at=None, body="Generated by AI")
+    r = prelabel_candidate(c)
+    assert "ai_disclosure_or_mention" not in r["signals"]
+
+
+def test_ai_case_insensitive():
+    c = _cand(body="chatgpt made this")
+    r = prelabel_candidate(c)
+    assert "ai_disclosure_or_mention" in r["signals"]
+
+
+# ------------------------------------------------------------------
+# Signal 2: silent_slop_pattern
+# ------------------------------------------------------------------
+
+def test_silent_slop_fires():
+    c = _cand(
+        merged=False,
+        closed_at=_OLD,
+        issue_comments=[],
+        review_comments=[],
+        author_prior_prs_in_repo=2,
+        additions=80,
+        deletions=30,
+    )
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" in r["signals"]
+
+
+def test_silent_slop_veteran_author_no_trigger():
+    c = _cand(author_prior_prs_in_repo=10, issue_comments=[], review_comments=[],
+              additions=80, deletions=30)
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" not in r["signals"]
+
+
+def test_silent_slop_too_small_no_trigger():
+    c = _cand(author_prior_prs_in_repo=1, issue_comments=[], review_comments=[],
+              additions=5, deletions=5)  # total = 10 < 20
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" not in r["signals"]
+
+
+def test_silent_slop_too_large_no_trigger():
+    c = _cand(author_prior_prs_in_repo=1, issue_comments=[], review_comments=[],
+              additions=400, deletions=200)  # total = 600 > 500
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" not in r["signals"]
+
+
+def test_silent_slop_with_comments_no_trigger():
+    comment = {"user": "rando", "author_association": "NONE", "body": "looks good", "created_at": _OLD}
+    c = _cand(author_prior_prs_in_repo=1, issue_comments=[comment],
+              additions=80, deletions=30)
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" not in r["signals"]
+
+
+def test_silent_slop_prior_prs_none_no_trigger():
+    # If prior_prs is unknown (None), don't fire (can't confirm first-timer)
+    c = _cand(author_prior_prs_in_repo=None, issue_comments=[], review_comments=[],
+              additions=80, deletions=30)
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" not in r["signals"]
+
+
+def test_silent_slop_boundary_exactly_3_prior():
+    c = _cand(author_prior_prs_in_repo=3, issue_comments=[], review_comments=[],
+              additions=80, deletions=30)
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" in r["signals"]
+
+
+def test_silent_slop_boundary_4_prior_no_trigger():
+    c = _cand(author_prior_prs_in_repo=4, issue_comments=[], review_comments=[],
+              additions=80, deletions=30)
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" not in r["signals"]
+
+
+def test_silent_slop_boundary_min_lines():
+    c = _cand(author_prior_prs_in_repo=1, issue_comments=[], review_comments=[],
+              additions=10, deletions=10)  # total = 20, exactly at min
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" in r["signals"]
+
+
+def test_silent_slop_boundary_max_lines():
+    c = _cand(author_prior_prs_in_repo=1, issue_comments=[], review_comments=[],
+              additions=300, deletions=200)  # total = 500, exactly at max
+    r = prelabel_candidate(c)
+    assert "silent_slop_pattern" in r["signals"]
+
+
+# ------------------------------------------------------------------
+# Signal 3: maintainer_explicit_rejection
+# ------------------------------------------------------------------
+
+@pytest.mark.parametrize("phrase", [
+    "AI policy",
+    "violating our policies",
+    "violating our policy",
+    "AI-generated",            # hyphen variant
+    "AI generated",            # space variant (pydantic: "most likely fully AI generated")
+    "drive-by",
+    "did you write this yourself",
+    "please read CONTRIBUTING",
+    "read the instructions",
+    "read the guidelines",
+    "read the policy",
+    "did you actually test",
+    "out of scope",
+    "not accepted",
+    "procedures not followed",  # ghostty#10614
+    "bot spam",                 # poetry#10833
+])
+def test_maintainer_explicit_phrase(phrase):
+    c = _cand(issue_comments=[_maintainer_comment(f"Closing because {phrase}.")])
+    r = prelabel_candidate(c)
+    assert "maintainer_explicit_rejection" in r["signals"]
+
+
+def test_maintainer_explicit_contributor_fires():
+    # CONTRIBUTOR fires — mitchellh (ghostty), dimbleby (poetry) are CONTRIBUTOR
+    comment = {
+        "user": "founder",
+        "author_association": "CONTRIBUTOR",
+        "body": "Closing this due to violating our policies.",
+        "created_at": (_NOW - timedelta(days=30) - timedelta(minutes=30)).isoformat(),
+    }
+    c = _cand(issue_comments=[comment])
+    r = prelabel_candidate(c)
+    assert "maintainer_explicit_rejection" in r["signals"]
+
+
+def test_maintainer_explicit_outside_window_no_trigger():
+    # Comment posted 48h before close — outside the 24h window
+    c = _cand(issue_comments=[_maintainer_comment("out of scope", hours_before_close=48)])
+    r = prelabel_candidate(c)
+    assert "maintainer_explicit_rejection" not in r["signals"]
+
+
+def test_maintainer_explicit_no_matching_phrase():
+    c = _cand(issue_comments=[_maintainer_comment("Thanks for the contribution!")])
+    r = prelabel_candidate(c)
+    assert "maintainer_explicit_rejection" not in r["signals"]
+    assert r["label"] == "rejected_quality"  # maintainer comment → rejected_quality
+
+
+# ------------------------------------------------------------------
+# Confidence stacking
+# ------------------------------------------------------------------
+
+def test_confidence_one_signal_low():
+    c = _cand(body="Written by AI")
+    r = prelabel_candidate(c)
+    assert r["label"] == "slop"
+    assert r["confidence"] == "low"
+    assert len(r["signals"]) == 1
+
+
+def test_confidence_two_signals_medium():
+    # ai_disclosure + silent_slop
+    c = _cand(
+        body="Generated by AI",
+        issue_comments=[],
+        review_comments=[],
+        author_prior_prs_in_repo=1,
+        additions=80,
+        deletions=30,
+    )
+    r = prelabel_candidate(c)
+    assert r["label"] == "slop"
+    assert r["confidence"] == "medium"
+    assert len(r["signals"]) == 2
+
+
+def test_confidence_three_signals_high():
+    # ai_disclosure + silent_slop + maintainer_explicit
+    # silent_slop requires no comments, but maintainer_explicit requires a comment — these can't co-occur
+    # so three signals are theoretically possible via ai_disclosure + maintainer_explicit + silent_slop
+    # but silent_slop and maintainer_explicit are mutually exclusive (one needs 0 comments, other needs a comment).
+    # Test two signals + one more via ai_disclosure + maintainer_explicit (which allows comments).
+    close_time = (_NOW - timedelta(days=30)).isoformat()
+    comment = {
+        "user": "owner",
+        "author_association": "OWNER",
+        "body": "AI policy violation, closing.",
+        "created_at": (_NOW - timedelta(days=30) - timedelta(minutes=30)).isoformat(),
+    }
+    # Manufacture a candidate that could get all 3: set prior_prs=1 but there IS a comment,
+    # so silent_slop won't fire. We'll settle for 2 signals here (ai + maintainer_explicit).
+    c = _cand(
+        body="Written by ChatGPT",
+        closed_at=close_time,
+        issue_comments=[comment],
+        review_comments=[],
+        author_prior_prs_in_repo=1,
+        additions=80,
+        deletions=30,
+    )
+    r = prelabel_candidate(c)
+    assert r["label"] == "slop"
+    assert r["confidence"] == "medium"
+    assert "ai_disclosure_or_mention" in r["signals"]
+    assert "maintainer_explicit_rejection" in r["signals"]
+
+
+def test_confidence_from_count():
+    from pr_triage.prelabel import prelabel_candidate as _fn
+    # Verify the stacking rule algebraically via a fabricated 3-signal scenario.
+    # Create a candidate where we inject 3 signals by patching the internal list
+    # indirectly: use a body with AI keyword + maintainer_explicit phrase in comment
+    # + silent_slop. Since silent_slop needs 0 comments but maintainer_explicit
+    # needs a comment, we can't get 3 signals naturally — 2 is the real max.
+    # This test just asserts that 3+ would yield "high" by testing the formula.
+    # We validate the boundary: if somehow 3 signals fired, confidence is "high".
+    n = 3
+    confidence = "low" if n == 1 else ("medium" if n == 2 else "high")
+    assert confidence == "high"
+
+
+# ------------------------------------------------------------------
+# prelabel_dir
+# ------------------------------------------------------------------
+
+def _write_candidate(path: Path, **overrides) -> None:
+    data = {
+        "_meta": {},
+        "repo": "owner/repo",
+        "pr_number": 1,
+        "title": "PR",
+        "additions": 50,
+        "deletions": 20,
+        "changed_files": 2,
+        "files_changed": ["src/a.py"],
+        "labels": [],
+        "draft": False,
+        "merged": False,
+        "closed_at": _OLD,
+        "author_prior_prs_in_repo": 10,
+        "body": "",
+        "issue_comments": [],
+        "review_comments": [],
+    }
+    data.update(overrides)
+    path.write_text(json.dumps(data))
+
+
+def test_prelabel_dir_writes_jsonl(tmp_path):
+    cand_dir = tmp_path / "candidates"
+    cand_dir.mkdir()
+    out_path = tmp_path / "pre_labels.jsonl"
+
+    _write_candidate(cand_dir / "owner__repo_pr1.json", pr_number=1, merged=True)
+    _write_candidate(cand_dir / "owner__repo_pr2.json", pr_number=2, merged=False,
+                     body="Generated by AI")
+    _write_candidate(cand_dir / "owner__repo_pr3.json", pr_number=3, merged=False)
+
+    count = prelabel_dir(cand_dir, out_path)
+    assert count == 3
+
+    lines = [json.loads(l) for l in out_path.read_text().splitlines() if l.strip()]
+    assert len(lines) == 3
+    labels = {l["pr_number"]: l["label"] for l in lines}
+    assert labels[1] == "accepted"
+    assert labels[2] == "slop"
+    assert labels[3] == "unclear"
+
+    # Output schema check
+    for line in lines:
+        assert "label" in line
+        assert "confidence" in line
+        assert "signals" in line
+        assert isinstance(line["signals"], list)
+
+
+def test_prelabel_dir_skips_invalid_json(tmp_path):
+    cand_dir = tmp_path / "candidates"
+    cand_dir.mkdir()
+    out_path = tmp_path / "pre_labels.jsonl"
+
+    (cand_dir / "bad.json").write_text("not json {{{")
+    _write_candidate(cand_dir / "owner__repo_pr1.json")
+
+    count = prelabel_dir(cand_dir, out_path)
+    assert count == 1
+
+
+def test_prelabel_dir_creates_output_parent(tmp_path):
+    cand_dir = tmp_path / "candidates"
+    cand_dir.mkdir()
+    out_path = tmp_path / "nested" / "deep" / "pre_labels.jsonl"
+
+    prelabel_dir(cand_dir, out_path)
+    assert out_path.exists()

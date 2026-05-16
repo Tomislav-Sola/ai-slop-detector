@@ -1,0 +1,68 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:15:04.879336+00:00"
+  },
+  "repo": "curl/curl",
+  "pr_number": 21349,
+  "title": "GHA/scorecard: try running OpenSSF scorecard checker",
+  "body": "Refs:\r\n988c1c12f51d4126702288d3c4ec7e5a08030321\r\nca76c79b34f9d90105674a2151bf228ff7b13bef\r\nhttps://scorecard.dev/viewer/?uri=github.com%2Fcurl%2Fcurl\r\n\r\n---\r\n\r\nThis has been added and reverted in 2022.\r\n",
+  "author": "vszakats",
+  "created_at": "2026-04-16T21:25:05Z",
+  "updated_at": "2026-04-26T09:09:07Z",
+  "closed_at": "2026-04-25T08:20:30Z",
+  "merged_at": null,
+  "base_branch": "master",
+  "head_branch": "scorecard",
+  "additions": 42,
+  "deletions": 0,
+  "changed_files": 1,
+  "files_changed": [
+    ".github/workflows/scorecard.yml"
+  ],
+  "labels": [
+    "CI"
+  ],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 999,
+  "linked_issues": [],
+  "issue_comments": [
+    {
+      "user": "bagder",
+      "author_association": "MEMBER",
+      "body": "Does this actually add any value?",
+      "created_at": "2026-04-16T22:02:45+00:00"
+    },
+    {
+      "user": "vszakats",
+      "author_association": "MEMBER",
+      "body": "I don't think it does. Made a try to tick a box, but it doesn't feel good\r\nto grant (write) rights to more Actions, and it's kind of confusing what\r\nit needs exactly to publish results on scorecard.dev and nowhere else.\r\n",
+      "created_at": "2026-04-16T22:15:21+00:00"
+    },
+    {
+      "user": "vszakats",
+      "author_association": "MEMBER",
+      "body": "FTR here's the SARIF file created by the scorecard checker run:\r\n[sarif.json](https://github.com/user-attachments/files/27080147/sarif.json)\r\n(this is with public-access only)\r\nvia https://github.com/curl/curl/actions/runs/24900354101/job/72916135981?pr=21349\r\n\r\n- misses the license and refers to REUSE, which is already used and passing.\r\n- wants the `SECURITY.md` in root.\r\n- complains about the known issue of non-pinned fuzzer (it can't be pinned).\r\n- seems to be missing we already have Dependabot (and Renovate).\r\n- complains about dangerous workflow patterns, which I guess may be the labeler.\r\n  Another known thing and not an actual issue. Also unfixable.\r\n- complains about permissions. These are extensively checked via zizmor and CodeQL already.\r\n- binary artifacts, a false positive.\r\n- wants declaring dependencies. Already done where supported (pip), but detection misses them.\r\n- complains about missing downloadable package. curl already provides a source tarball.\r\n- recommends CodeQL, which is already used.\r\n- recommends OSS-Fuzz, also already used.\r\n- says GHSA-mj63-64x7-57xf vulnerability in pip impacket. False positive, due to not detecting pinned version.\r\n\r\n+1 it's kind of unclear (to me) which permission/secret/token is necessary for which Scorecard checker functionality.\r\n\r\nSkipping this after a second (third?) review.\r\n",
+      "created_at": "2026-04-25T08:20:30+00:00"
+    },
+    {
+      "user": "dfandrich",
+      "author_association": "CONTRIBUTOR",
+      "body": "Can you raise these upstream? Cut-and-paste of this comment is about all you would need.\n",
+      "created_at": "2026-04-25T22:49:44+00:00"
+    },
+    {
+      "user": "vszakats",
+      "author_association": "MEMBER",
+      "body": "> Can you raise these upstream? Cut-and-paste of this comment is about all you would need.\r\n\r\nI'm not very confident in my reading of the raw SARIF JSON file. It also misses any actual file\r\nreferences, which makes me think I may be holding it wrong. Another issue IMO is that the\r\nScorecard checher itself wants to use a bunch of (to me confusing) secrets and permissions\r\nwhich I did not provide in this run. Running more jobs with write permissions isn't something\r\nI'd personally happy to do. I fear when reporting this, we'd be forced to continue debugging with\r\nsecrets enabled. Most of these issues looks trivial, I find it somewhat unlikely thay would be\r\nfixed.\r\n\r\nAll in all, I'm not sure I'd like to enter this rabbit hole. There are just so many of them these\r\ndays already. But if someone does, it's may be a useful thing for everyone indeed.\r\n",
+      "created_at": "2026-04-26T09:07:54+00:00"
+    }
+  ],
+  "bot_comments": [],
+  "review_comments": [],
+  "raw_diff": "diff --git a/.github/workflows/scorecard.yml b/.github/workflows/scorecard.yml\nnew file mode 100644\nindex 000000000000..2fa4e4093a94\n--- /dev/null\n+++ b/.github/workflows/scorecard.yml\n@@ -0,0 +1,42 @@\n+# Copyright (C) Daniel Stenberg, <daniel@haxx.se>, et al.\n+#\n+# SPDX-License-Identifier: curl\n+\n+name: 'OpenSSF Scorecard'\n+\n+'on':\n+  schedule:\n+    - cron: '0 7 * * 1'\n+  push:\n+    branches:\n+      - master\n+    paths:\n+      - '.github/workflows/scorecard.yml'\n+  pull_request:\n+    branches:\n+      - master\n+    paths:\n+      - '.github/workflows/scorecard.yml'\n+\n+concurrency:\n+  group: ${{ github.workflow }}-${{ github.sha }}\n+  cancel-in-progress: true\n+\n+permissions: {}\n+\n+jobs:\n+  analysis:\n+    if: ${{ github.repository_owner == 'curl' || github.event_name != 'schedule' }}\n+    name: 'analysis'\n+    runs-on: ubuntu-latest\n+    steps:\n+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n+        with:\n+          persist-credentials: false\n+\n+      - name: 'Run analysis'\n+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3\n+        with:\n+          results_file: 'results.sarif'\n+          results_format: sarif\n+          publish_results: true\n",
+  "golden_label": "rejected_quality",
+  "label_notes": "Maintainer self-reject after evaluation (vszakats, prior_prs 999) of OpenSSF Scorecard CI workflow proposal. bagder questioned value upfront ('Does this actually add any value?'), vszakats agreed and ran the tool to evaluate. 9 days later closed with detailed 11-point technical review of Scorecard output: false positives, unfixable issues, unnecessary permissions, tool incompatibility with curl's existing setup (CodeQL, OSS-Fuzz, REUSE, zizmor, Dependabot, Renovate). Different rejected_quality sub-pattern from charliermarsh ruff#22067 (soundness bug) \u2014 here it's tool-value mismatch evaluated through running the tool. Adds curl repo diversity to rejected_quality class.",
+  "author_association": "MEMBER",
+  "is_slop": false
+}

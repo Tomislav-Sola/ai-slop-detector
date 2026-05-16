@@ -1,0 +1,174 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-14T17:08:06.425111+00:00"
+  },
+  "repo": "godotengine/godot",
+  "pr_number": 116422,
+  "title": "Core: Add non-finite checks to Transform3D::interpolate_with() and Basis::get_quaternion()",
+  "body": "### Summary of changes\r\nAdded `is_finite()` checks to `Transform3D::interpolate_with()` and `Basis::get_quaternion()` to provide clearer error reporting for non-finite values (NaN/INF).\r\n\r\n### Motivation\r\nFixes #73299. The current error message \"Basis must be normalized in order to be casted to a Quaternion\" confused developers on what the actual cause is for the error in cases where the transforms or weight were not finite. This change helps developers identify the root cause faster.\r\n\r\n### Technical overview\r\n* **Transform3D**: Added checks for the starting transform, destination transform, and interpolation weight. This ensures the function fails early with a specific message before performing math with NaN or INF values.\r\n* **Basis**: Added a check to `get_quaternion()` to catch non-finite bases. This prevents the code from reaching the `is_rotation()` check, which was the source of the confusing \"not normalized\" error reported in the issue.\r\n\r\n### Testing\r\nTested using the reproduction script provided in issue #73299.\r\n\r\n**Result:** The console now provides a stack trace specific to the non-finite values, rather than a generic normalization error.\r\n\r\n```text\r\nE 0:00:00:886   character_body_3d.gd:27 @ _ready(): The starting transform is not finite, contains NaN or INF.\r\n  <C++ Error>   Condition \"!is_finite()\" is true. Returning: Transform3D()\r\n  <C++ Source>  core\\math\\transform_3d.cpp:98 @ Transform3D::interpolate_with()\r\n  <Stack Trace> character_body_3d.gd:27 @ _ready()\r\n\r\nE 0:00:00:893   Basis::get_quaternion: The Basis is not finite, contains NaN or INF.\r\n  <C++ Error>   Condition \"!is_finite()\" is true. Returning: Quaternion()\r\n  <C++ Source>  core\\math\\basis.cpp:716 @ Basis::get_quaternion()",
+  "author": "miguelrsgoncalves",
+  "created_at": "2026-02-17T22:30:15Z",
+  "updated_at": "2026-04-30T21:46:09Z",
+  "closed_at": "2026-03-12T14:07:06Z",
+  "merged_at": null,
+  "base_branch": "master",
+  "head_branch": "improve-nan-transform-interpolation-error-message",
+  "additions": 5,
+  "deletions": 0,
+  "changed_files": 2,
+  "files_changed": [
+    "core/math/basis.cpp",
+    "core/math/transform_3d.cpp"
+  ],
+  "labels": [
+    "enhancement",
+    "archived",
+    "topic:core"
+  ],
+  "draft": false,
+  "merged": false,
+  "author_prior_prs_in_repo": 1,
+  "linked_issues": [
+    {
+      "number": 73299,
+      "repo": null,
+      "title": "Unhelpful error message when interpolating on a NaN transform"
+    }
+  ],
+  "issue_comments": [
+    {
+      "user": "fire",
+      "author_association": "MEMBER",
+      "body": "I want to discuss with the animation team meeting later this week.",
+      "created_at": "2026-02-17T22:56:40+00:00"
+    },
+    {
+      "user": "miguelrsgoncalves",
+      "author_association": "CONTRIBUTOR",
+      "body": "> I want to discuss with the animation team meeting later this week.\r\n\r\nShould I apply the recomended changes or wait for the discussion?",
+      "created_at": "2026-02-17T23:00:15+00:00"
+    },
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "> Should I apply the recomended changes or wait for the discussion?\r\n\r\nEither is fine.",
+      "created_at": "2026-02-17T23:04:08+00:00"
+    },
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "@miguelrsgoncalves I think @TokageItLab and I are on the same page now:\r\n\r\n- Finite checks should be added to normalization methods.\r\n- Finite checks can be removed from `interpolate_with` because the mistake should be caught in the normalization method.\r\n\r\nWhether or not the finite check can be removed from `get_quaternion` is less certain to me. I would recommend you remove it, by Tokage's recommendation, even though I'd personally be less inclined to remove it.",
+      "created_at": "2026-02-18T07:48:54+00:00"
+    },
+    {
+      "user": "miguelrsgoncalves",
+      "author_association": "CONTRIBUTOR",
+      "body": "Alright, sounds good. Will look into it as soon as I can",
+      "created_at": "2026-02-18T08:07:07+00:00"
+    },
+    {
+      "user": "TokageItLab",
+      "author_association": "MEMBER",
+      "body": "If we change normalize method, it would be a fairly fundamental change and we need to be careful, so I created a PR for that https://github.com/godotengine/godot/pull/116427",
+      "created_at": "2026-02-18T09:02:56+00:00"
+    },
+    {
+      "user": "Repiteo",
+      "author_association": "CONTRIBUTOR",
+      "body": "Superseded by #116427; thanks for your contribution!",
+      "created_at": "2026-03-12T14:07:06+00:00"
+    }
+  ],
+  "bot_comments": [],
+  "review_comments": [
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "I don't think the check for `p_c` is needed, it should just return a NaN Transform3D without erroring (which is expected with NaN inputs).",
+      "created_at": "2026-02-17T22:47:33+00:00",
+      "path": "core/math/transform_3d.cpp"
+    },
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "Perhaps we should also print the basis using `operator String()`, as in the error message below this one.",
+      "created_at": "2026-02-17T22:48:00+00:00",
+      "path": "core/math/basis.cpp"
+    },
+    {
+      "user": "TokageItLab",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n```\r\nAs I said above.",
+      "created_at": "2026-02-18T02:39:17+00:00",
+      "path": "core/math/basis.cpp"
+    },
+    {
+      "user": "TokageItLab",
+      "author_association": "MEMBER",
+      "body": "Should be added for other interpolation functions like Vector2::lerp, slerp, cubic_interpolate... and more classes. However, implementing this implies that other functions may also require checks, which makes the very purpose of this PR questionable.",
+      "created_at": "2026-02-18T02:42:07+00:00",
+      "path": "core/math/transform_3d.cpp"
+    },
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "I disagree. I think the check should only be added if the function errors out in some way if it receives non finite values, like described in the original issue. If NaN is given, and all that happens is that NaN is returned, we don't need to check for it. It is mathematically expected.",
+      "created_at": "2026-02-18T06:09:36+00:00",
+      "path": "core/math/transform_3d.cpp"
+    },
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "I assume you have checked that, if NaN or INF is in the quaternion, `is_rotation` returns `true`? Because otherwise, it will error out anyway in the next line of code.\nThe point of https://github.com/godotengine/godot/issues/73299 was to improve the error reporting, not to add error cases.",
+      "created_at": "2026-02-18T06:38:45+00:00",
+      "path": "core/math/basis.cpp"
+    },
+    {
+      "user": "TokageItLab",
+      "author_association": "MEMBER",
+      "body": "Therefore, as I wrote in https://github.com/godotengine/godot/issues/73299#issuecomment-3918297695. Considering consistency, it would need to be added to the all interpolation methods, but I don't think that's correct. If that were the case, it would mean this PR itself is wrong. The correct direction should be to add a check to the normalization function.",
+      "created_at": "2026-02-18T07:00:53+00:00",
+      "path": "core/math/transform_3d.cpp"
+    },
+    {
+      "user": "TokageItLab",
+      "author_association": "MEMBER",
+      "body": "It is true that quaternions can contain INF or NaN. While this does not represent a rotation, it is a mathematically valid state, so this check is incorrect anyway.\r\n\r\nAdding that check to `get_rotation_quaternion()` makes sense, but it implies that the check should be performed during normalization, as mentioned below.",
+      "created_at": "2026-02-18T07:03:45+00:00",
+      "path": "core/math/basis.cpp"
+    },
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "Did you look at the line below this suggested change? It will error out if `!is_rotation()`. So it will error anyway, just with a worse fitting error message.",
+      "created_at": "2026-02-18T07:06:36+00:00",
+      "path": "core/math/basis.cpp"
+    },
+    {
+      "user": "TokageItLab",
+      "author_association": "MEMBER",
+      "body": "In that case, just add a check to the is_rotation() method to determine if it is normalizable and improve the wording of the is_rotation() check. But the presence of NaN or INF is synonymous with being unnormalized, and I don't see much point in distinguishing them here.\r\n\r\nAgain, the main issue with https://github.com/godotengine/godot/issues/73299 's problem is that it fails to detect when the normalized matrix is not properly normalized due to containing NaN or INF values. In other words, the warning tells you to normalize, but even if you do so, it doesn't resolve the issue, which is the problem. Therefore, checks should be implemented within the normalization function.",
+      "created_at": "2026-02-18T07:12:33+00:00",
+      "path": "core/math/basis.cpp"
+    },
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "I guess you mean `orthonormalized()`? Agreed, this would improve the situation expectedly (although it would still also print the error messages from https://github.com/godotengine/godot/issues/73299).",
+      "created_at": "2026-02-18T07:12:57+00:00",
+      "path": "core/math/transform_3d.cpp"
+    },
+    {
+      "user": "Ivorforce",
+      "author_association": "MEMBER",
+      "body": "Should `is_rotation` really error on NaN / INF? I feel like _checking if_ a Quat with NaN / INF is a rotation should just silently return `false`. I think the check for it is more appropriate here, to improve on error reporting in the case of `is_rotation()` due to NaN/INF.\n\nChecking in the normalization function sounds like a good idea though.",
+      "created_at": "2026-02-18T07:15:44+00:00",
+      "path": "core/math/basis.cpp"
+    }
+  ],
+  "raw_diff": "diff --git a/core/math/basis.cpp b/core/math/basis.cpp\nindex 5931ecb257d8..1ba3802ac1fa 100644\n--- a/core/math/basis.cpp\n+++ b/core/math/basis.cpp\n@@ -713,6 +713,7 @@ Basis::operator String() const {\n \n Quaternion Basis::get_quaternion() const {\n #ifdef MATH_CHECKS\n+\tERR_FAIL_COND_V_MSG(!is_finite(), Quaternion(), \"Basis \" + operator String() + \" is not finite, contains NaN or INF.\");\n \tERR_FAIL_COND_V_MSG(!is_rotation(), Quaternion(), \"Basis \" + operator String() + \" must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.\");\n #endif\n \t/* Allow getting a quaternion from an unnormalized transform */\ndiff --git a/core/math/transform_3d.cpp b/core/math/transform_3d.cpp\nindex b4d02408ac6a..2f9dbd606f0e 100644\n--- a/core/math/transform_3d.cpp\n+++ b/core/math/transform_3d.cpp\n@@ -94,6 +94,10 @@ void Transform3D::set_look_at(const Vector3 &p_eye, const Vector3 &p_target, con\n }\n \n Transform3D Transform3D::interpolate_with(const Transform3D &p_transform, real_t p_c) const {\n+#ifdef MATH_CHECKS\n+\tERR_FAIL_COND_V_MSG(!is_finite(), Transform3D(), \"The starting transform is not finite, contains NaN or INF.\");\n+\tERR_FAIL_COND_V_MSG(!p_transform.is_finite(), Transform3D(), \"The destination transform is not finite, contains NaN or INF.\");\n+#endif\n \tTransform3D interp;\n \n \tVector3 src_scale = basis.get_scale();\n",
+  "golden_label": "rejected_quality",
+  "label_notes": "First Godot case in rejected_quality, first 'superseded by maintainer alternative' sub-pattern. First-time-contributor (miguelrsgoncalves, prior_prs=1) identified real issue (#73299: unhelpful NaN/INF error message in Transform3D::interpolate_with), proposed +5/-0 fix with finite() checks. Substantial multi-maintainer technical discussion (fire, Ivorforce, TokageItLab): two maintainers initially disagreed, consensus emerged that checks should be at normalize() level (fundamental change), not at interpolate_with/get_quaternion (treating symptoms). TokageItLab authored alternative PR #116427 implementing the architectural fix. Repiteo closed this PR 3 weeks later with 'Superseded by #116427; thanks for your contribution!' Different from curl#21242 (external contribution accepted-via-direct-commit \u2192 skip): here architectural approach was wrong, supersession is content-rejection. Calibration value: critic must distinguish 'real problem, wrong fix layer' from slop \u2014 contributor's diagnosis was correct, implementation was at wrong abstraction. Adds Godot repo diversity to rejected_quality class.",
+  "author_association": "CONTRIBUTOR",
+  "is_slop": false
+}

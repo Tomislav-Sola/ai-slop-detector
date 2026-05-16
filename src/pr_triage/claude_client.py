@@ -17,6 +17,15 @@ from pr_triage import budget as _budget
 MODEL_SONNET = "claude-sonnet-4-6"
 MODEL_HAIKU = "claude-haiku-4-5-20251001"
 
+# Approximate prices in USD per token (not per million).
+# These are best-effort estimates — verify against https://www.anthropic.com/pricing.
+_PRICE_PER_TOKEN: dict[str, dict[str, float]] = {
+    MODEL_HAIKU:  {"input": 0.80e-6, "output": 4.00e-6},
+    MODEL_SONNET: {"input": 3.00e-6, "output": 15.00e-6},
+    "claude-opus-4-7": {"input": 15.00e-6, "output": 75.00e-6},
+}
+_PRICE_FALLBACK = {"input": 3.00e-6, "output": 15.00e-6}  # sonnet-class default
+
 _RETRYABLE = (
     anthropic.RateLimitError,
     anthropic.InternalServerError,
@@ -49,9 +58,14 @@ class ClaudeClient:
         self._fake = fake
         self._fake_queue: list[str] = list(fake_responses or [])
         self._fake_index = 0
+        self._total_cost_usd: float = 0.0
 
         if not fake:
             self._client = anthropic.Anthropic(api_key=api_key)
+
+    @property
+    def total_cost_usd(self) -> float:
+        return self._total_cost_usd
 
     def complete(
         self,
@@ -116,6 +130,10 @@ class ClaudeClient:
         input_tokens = msg.usage.input_tokens
         output_tokens = msg.usage.output_tokens
         _budget.consume(input_tokens + output_tokens)
+        pricing = _PRICE_PER_TOKEN.get(model, _PRICE_FALLBACK)
+        self._total_cost_usd += (
+            input_tokens * pricing["input"] + output_tokens * pricing["output"]
+        )
         return msg.content[0].text
 
 

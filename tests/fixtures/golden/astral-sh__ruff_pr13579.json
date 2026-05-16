@@ -1,0 +1,292 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-15T17:57:33.782082+00:00"
+  },
+  "repo": "astral-sh/ruff",
+  "pr_number": 13579,
+  "title": "Support `__getitem__` type inference for subscripts",
+  "body": "## Summary\r\n\r\nFollow-up to https://github.com/astral-sh/ruff/pull/13562, to add support for \"arbitrary\" subscript operations.\r\n",
+  "author": "charliermarsh",
+  "author_association": "MEMBER",
+  "created_at": "2024-10-01T03:41:46Z",
+  "updated_at": "2026-05-11T01:52:02Z",
+  "closed_at": "2024-10-01T18:04:16Z",
+  "merged_at": "2024-10-01T18:04:16Z",
+  "base_branch": "main",
+  "head_branch": "charlie/getitem",
+  "additions": 310,
+  "deletions": 1,
+  "changed_files": 2,
+  "files_changed": [
+    "crates/red_knot_python_semantic/src/types.rs",
+    "crates/red_knot_python_semantic/src/types/infer.rs"
+  ],
+  "labels": [
+    "ty"
+  ],
+  "draft": false,
+  "merged": true,
+  "author_prior_prs_in_repo": 999,
+  "linked_issues": [],
+  "issue_comments": [
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "We're getting new errors in the benchmark due to expressions like `frozenset[str]` or `dict[str]`:\r\n\r\n```\r\nDunder method `__class_getitem__` is not callable on type 'Literal[frozenset]'\r\n```",
+      "created_at": "2024-10-01T04:16:25+00:00"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Those seem to have a type that's a union of `Unknown` and the `__class_getitem__` function definition.",
+      "created_at": "2024-10-01T04:18:04+00:00"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Okay, I think (?) that's because in typeshed they're defined as:\r\n\r\n```\r\nif sys.version_info >= (3, 9):\r\n    def __class_getitem__(cls, item: Any, /) -> GenericAlias: ...\r\n```",
+      "created_at": "2024-10-01T04:19:50+00:00"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "> Those seem to have a type that's a union of `Unknown` and the `__class_getitem__` function definition.\r\n\r\nHmm, that's kinda odd that it's creating issues, though. Both `Unknown` and the `__class_getitem__` function should be treated as callable, because `Unknown` should have all possible attributes",
+      "created_at": "2024-10-01T10:23:00+00:00"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "> > Those seem to have a type that's a union of `Unknown` and the `__class_getitem__` function definition.\r\n> \r\n> Hmm, that's kinda odd that it's creating issues, though. Both `Unknown` and the `__class_getitem__` function should be treated as callable, because `Unknown` should have all possible attributes\r\n\r\nOkay @charliermarsh I think this is because you're doing this:\r\n\r\n```rs\r\n                    let CallOutcome::Callable { return_ty } =\r\n                        dunder_getitem_method.call(self.db, &[slice_ty])\r\n                    else\r\n```\r\n\r\nBut the result of `Union[Unknown, <some function>].call()` is not `CallOutcome::Callable` (even though all items in the union are actually callable), it's `CallOutcome::Union`",
+      "created_at": "2024-10-01T14:13:16+00:00"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "I think you can fix this by making use of one of these two helper methods we have on `CallOutcome`, both of which abstract away the difference between `CallOutcome::Callable` and `CallOutcome::Union`:\r\n\r\nhttps://github.com/astral-sh/ruff/blob/cfd5d639176730a6d4a299864e7606d024a0f55a/crates/red_knot_python_semantic/src/types.rs#L851-L971",
+      "created_at": "2024-10-01T14:15:53+00:00"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "@carljm -- I believe all the feedback is resolved with the exception that the dunder diagnostic regressed due to the use of `unwrap_with_diagnostic` (as you mentioned). I may look at that in a separate PR since it doesn't necessarily need to be coupled to these changes.",
+      "created_at": "2024-10-01T17:37:33+00:00"
+    }
+  ],
+  "bot_comments": [
+    {
+      "user": "github-actions[bot]",
+      "author_association": "CONTRIBUTOR",
+      "body": "<!-- generated-comment ecosystem -->\n## `ruff-ecosystem` results\n### Linter (stable)\n\u2705 ecosystem check detected no linter changes.\n\n### Linter (preview)\n\u2705 ecosystem check detected no linter changes.\n\n\n",
+      "created_at": "2024-10-01T03:55:29+00:00"
+    }
+  ],
+  "review_comments": [
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Very hard to test these right now given various TODO types that are returned.",
+      "created_at": "2024-10-01T03:42:06+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Is there anything to do here yet? E.g., I _could_ \"manually\" validate that `\"abc\"[()]` is not a valid operation, but I guess I'd rather get this \"for free\" from typeshed?",
+      "created_at": "2024-10-01T03:42:38+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "Correct, nothing really to do here at this point!",
+      "created_at": "2024-10-01T07:30:23+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "nit:\r\n\r\n```suggestion\r\n                // Otherwise, emit a diagnostic.\r\n```",
+      "created_at": "2024-10-01T07:31:28+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "I wrote these docs! Glad they're coming in useful \ud83d\ude03",
+      "created_at": "2024-10-01T10:25:13+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "nit (since a literal `str` is inferred as a different `Type` variant to an arbitrary `str` in our semantic model):\r\n\r\n```suggestion\r\n    fn subscript_str_literal() -> anyhow::Result<()> {\r\n```",
+      "created_at": "2024-10-01T10:26:35+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "Something like this seems to pass for me locally:\r\n\r\n```diff\r\ndiff --git a/crates/red_knot_python_semantic/src/types/infer.rs b/crates/red_knot_python_semantic/src/types/infer.rs\r\nindex 15b2626a8..f74c833ef 100644\r\n--- a/crates/red_knot_python_semantic/src/types/infer.rs\r\n+++ b/crates/red_knot_python_semantic/src/types/infer.rs\r\n@@ -6829,6 +6829,30 @@ mod tests {\r\n         Ok(())\r\n     }\r\n \r\n+    #[test]\r\n+    fn subscript_not_callable_getitem() -> anyhow::Result<()> {\r\n+        let mut db = setup_db();\r\n+\r\n+        db.write_dedented(\r\n+            \"/src/a.py\",\r\n+            \"\r\n+                class NotSubscriptable:\r\n+                    __getitem__ = None\r\n+\r\n+                a = NotSubscriptable()[0]\r\n+            \",\r\n+        )?;\r\n+\r\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"Unknown\");\r\n+        assert_file_diagnostics(\r\n+            &db,\r\n+            \"/src/a.py\",\r\n+            &[\"Dunder method `__getitem__` is not callable on type 'NotSubscriptable'.\"],\r\n+        );\r\n+\r\n+        Ok(())\r\n+    }\r\n```",
+      "created_at": "2024-10-01T10:32:19+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Nit: this feels a bit less verbose, and more consistent with our other diagnostics:\r\n```suggestion\r\n                \"Cannot subscript object of type '{}' with no `__getitem__` method.\",\r\n```",
+      "created_at": "2024-10-01T16:51:04+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Nit: I don't like using \"dunder\" in diagnostic messages, it feels a little too casual to me. It's snuck into the Python docs here and there, but it's not used in the data model docs.\r\n```suggestion\r\n                \"Method `{dunder}` is not callable on object of type '{}'.\",\r\n```",
+      "created_at": "2024-10-01T16:53:10+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "I actually would remove this TODO comment, because we already have a TODO for it inside `Type::call`, and that's where the validation should actually happen. I don't think there's anything more to do at this particular location.",
+      "created_at": "2024-10-01T16:55:35+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "As @AlexWaygood mentioned in another comment, matching directly on `CallOutcome` this way doesn't work correctly for calling unions. It also bypasses the diagnostics emitted by `CallOutcome::unwrap_with_diagnostic`, meaning the user gets no feedback about what the type of `__getitem__` is, that isn't callable.\r\n\r\nThe intended way to use `CallOutcome` is to just call `unwrap_with_diagnostic` on it, and not necessarily emit your own diagnostic on top of that. In this case, that means the user won't get the context that it's the `__getitem__` that wasn't callable, so we may want to add a way to pass additional context into `CallOutcome::unwrap_with_diagnostic` further identifying what it is that we tried and failed to call. (This would then mean we don't need `dunder_not_callable_diagnostic` anymore.)",
+      "created_at": "2024-10-01T17:00:25+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Yeah, a test like that should work; I'm curious what forms of test you tried, and what Todo types you ran into.",
+      "created_at": "2024-10-01T17:01:12+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "I think we should add `Type::is_class` (true if it's a `Type::Class` or a union of them) instead of directly matching on the `Type` variant this way. The reason is because we should also support `__class_getitem__` on a union of classes. `Type::member` and `Type::call` both already support unions, so it should \"just work\" if we don't prevent it here.\r\n\r\nAnd lets also add a test for this case.",
+      "created_at": "2024-10-01T17:08:38+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Same comment as above about using `CallOutcome::unwrap_with_diagnostic` instead of directly matching on the `CallOutcome`.",
+      "created_at": "2024-10-01T17:09:16+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "When we add support for `type[T]`, we'll need to remember to modify `Type::is_class()` so that it returns `true` for `type[T]` as well. `x.__class_getitem__` should not be an error if the type of `x` is `type[dict]` (since all subclasses of `dict` have `__class_getitem__` methods as well as `dict`).\r\n\r\nNothing to do for now, but a TODO comment in `Type::is_class` might be good",
+      "created_at": "2024-10-01T17:15:37+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "I honestly can't remember what I tried but it led to me adding `__call__` support. I think I was looking to resolve a type annotation in a class member and it was returning `Todo`, but I can't remember the details.",
+      "created_at": "2024-10-01T17:20:18+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "So the test case here would be \"The class is a union\" rather than \"`__class_getitem` is a union\", right?",
+      "created_at": "2024-10-01T17:33:11+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Yeah -- in part because the former will necessarily imply the latter (when you get a member of a union, you get the union of the members of all the constituent types of the union)",
+      "created_at": "2024-10-01T17:35:48+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Per Alex's comment:\r\n```suggestion\r\n            // TODO also type[X], once we add that type\r\n            _ => false,\r\n```",
+      "created_at": "2024-10-01T17:39:10+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Thank you missed that.",
+      "created_at": "2024-10-01T17:41:58+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "I'm not sure we'll do the right thing with this for something like\r\n\r\n```py\r\nflag = True\r\n\r\nif flag:\r\n    class Foo:\r\n        def __class_getitem__(self, x: int) -> str:\r\n            pass\r\nelse:\r\n    class Foo:\r\n        pass\r\n\r\nFoo[42]\r\n```\r\n\r\nHere we want to:\r\n1. Infer a union type for the `Foo` variable (it could be the first class definition, or the second)\r\n2. Emit a diagnostic because not all items in the union support being subscripted\r\n3. Infer `str | Unknown` for the result of the subscription",
+      "created_at": "2024-10-01T17:45:19+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "I think that is working as described? I added a test.",
+      "created_at": "2024-10-01T17:50:54+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "Yeah, I was debating whether to bring this up earlier, or whether it's adequate to just say \"not subscriptable\" in this case. I agree the behavior you're describing is probably more ideal. It might require explicitly handling unions as a special case here, and calling the class-getitem resolution method per element of the union? I'd also be fine with a TODO for this so this PR can land.",
+      "created_at": "2024-10-01T17:51:29+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "Are you instead thinking of something like this:\r\n\r\n```python\r\nflag = True\r\n\r\nif flag:\r\n    class Foo:\r\n        def __class_getitem__(self, x: int) -> str:\r\n            pass\r\nelse:\r\n    Foo = 1\r\n\r\nFoo[42]\r\n```\r\n\r\nWhere not all members of the union are classes?",
+      "created_at": "2024-10-01T17:54:23+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "Huh, your tests are pretty convincing. Thanks for adding them!",
+      "created_at": "2024-10-01T17:57:14+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "I added a test for the case I described above, which _does_ resolve to `Unknown` (with a TODO).",
+      "created_at": "2024-10-01T17:59:41+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "AlexWaygood",
+      "author_association": "MEMBER",
+      "body": "Ahh, I think I _did_ spot a bug but didn't accurately identify where the bug would manifest? Anyway, thanks again, a TODO for now is fine by me",
+      "created_at": "2024-10-01T18:01:26+00:00",
+      "path": "crates/red_knot_python_semantic/src/types.rs"
+    },
+    {
+      "user": "carljm",
+      "author_association": "CONTRIBUTOR",
+      "body": "This case also highlights that perhaps our \"not subscriptable\" diagnostic should mention `__class_getitem__` instead of `__getitem__` if `Type::is_class` is true? But I don't think that's critical to fix now.",
+      "created_at": "2024-10-01T18:07:51+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    },
+    {
+      "user": "charliermarsh",
+      "author_association": "MEMBER",
+      "body": "https://github.com/astral-sh/ruff/pull/13596",
+      "created_at": "2024-10-01T18:11:58+00:00",
+      "path": "crates/red_knot_python_semantic/src/types/infer.rs"
+    }
+  ],
+  "raw_diff": "diff --git a/crates/red_knot_python_semantic/src/types.rs b/crates/red_knot_python_semantic/src/types.rs\nindex 2268183d1d42e..349f073ed099a 100644\n--- a/crates/red_knot_python_semantic/src/types.rs\n+++ b/crates/red_knot_python_semantic/src/types.rs\n@@ -401,6 +401,16 @@ impl<'db> Type<'db> {\n         }\n     }\n \n+    /// Return true if the type is a class or a union of classes.\n+    pub fn is_class(&self, db: &'db dyn Db) -> bool {\n+        match self {\n+            Type::Union(union) => union.elements(db).iter().all(|ty| ty.is_class(db)),\n+            Type::Class(_) => true,\n+            // / TODO include type[X], once we add that type\n+            _ => false,\n+        }\n+    }\n+\n     /// Return true if this type is a [subtype of] type `target`.\n     ///\n     /// [subtype of]: https://typing.readthedocs.io/en/latest/spec/concepts.html#subtype-supertype-and-type-equivalence\ndiff --git a/crates/red_knot_python_semantic/src/types/infer.rs b/crates/red_knot_python_semantic/src/types/infer.rs\nindex 33155ad6cb957..b8b529865ff40 100644\n--- a/crates/red_knot_python_semantic/src/types/infer.rs\n+++ b/crates/red_knot_python_semantic/src/types/infer.rs\n@@ -1322,6 +1322,22 @@ impl<'db> TypeInferenceBuilder<'db> {\n         );\n     }\n \n+    /// Emit a diagnostic declaring that a type does not support subscripting.\n+    pub(super) fn non_subscriptable_diagnostic(\n+        &mut self,\n+        node: AnyNodeRef,\n+        non_subscriptable_ty: Type<'db>,\n+    ) {\n+        self.add_diagnostic(\n+            node,\n+            \"non-subscriptable\",\n+            format_args!(\n+                \"Cannot subscript object of type '{}' with no `__getitem__` method.\",\n+                non_subscriptable_ty.display(self.db)\n+            ),\n+        );\n+    }\n+\n     fn infer_for_statement_definition(\n         &mut self,\n         target: &ast::ExprName,\n@@ -2588,7 +2604,35 @@ impl<'db> TypeInferenceBuilder<'db> {\n                         Type::Unknown\n                     })\n             }\n-            _ => Type::Todo,\n+            (value_ty, slice_ty) => {\n+                // Resolve the value to its class.\n+                let value_meta_ty = value_ty.to_meta_type(self.db);\n+\n+                // If the class defines `__getitem__`, return its return type.\n+                //\n+                // See: https://docs.python.org/3/reference/datamodel.html#class-getitem-versus-getitem\n+                let dunder_getitem_method = value_meta_ty.member(self.db, \"__getitem__\");\n+                if !dunder_getitem_method.is_unbound() {\n+                    return dunder_getitem_method\n+                        .call(self.db, &[slice_ty])\n+                        .unwrap_with_diagnostic(self.db, value.as_ref().into(), self);\n+                }\n+\n+                // Otherwise, if the value is itself a class and defines `__class_getitem__`,\n+                // return its return type.\n+                if value_ty.is_class(self.db) {\n+                    let dunder_class_getitem_method = value_ty.member(self.db, \"__class_getitem__\");\n+                    if !dunder_class_getitem_method.is_unbound() {\n+                        return dunder_class_getitem_method\n+                            .call(self.db, &[slice_ty])\n+                            .unwrap_with_diagnostic(self.db, value.as_ref().into(), self);\n+                    }\n+                }\n+\n+                // Otherwise, emit a diagnostic.\n+                self.non_subscriptable_diagnostic((&**value).into(), value_ty);\n+                Type::Unknown\n+            }\n         }\n     }\n \n@@ -6723,6 +6767,261 @@ mod tests {\n         Ok(())\n     }\n \n+    #[test]\n+    fn subscript_getitem_unbound() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                class NotSubscriptable:\n+                    pass\n+\n+                a = NotSubscriptable()[0]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"Unknown\");\n+        assert_file_diagnostics(\n+            &db,\n+            \"/src/a.py\",\n+            &[\"Cannot subscript object of type 'NotSubscriptable' with no `__getitem__` method.\"],\n+        );\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_not_callable_getitem() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                class NotSubscriptable:\n+                    __getitem__ = None\n+\n+                a = NotSubscriptable()[0]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"Unknown\");\n+        assert_file_diagnostics(\n+            &db,\n+            \"/src/a.py\",\n+            &[\"Object of type 'None' is not callable.\"],\n+        );\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_str_literal() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                def add(x: int, y: int) -> int:\n+                    return x + y\n+\n+                a = 'abcde'[add(0, 1)]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"str\");\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_getitem() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                class Identity:\n+                    def __getitem__(self, index: int) -> int:\n+                        return index\n+\n+                a = Identity()[0]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"int\");\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_class_getitem() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                class Identity:\n+                    def __class_getitem__(cls, item: int) -> str:\n+                        return item\n+\n+                a = Identity[0]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"str\");\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_getitem_union() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                flag = True\n+\n+                class Identity:\n+                    if flag:\n+                        def __getitem__(self, index: int) -> int:\n+                            return index\n+                    else:\n+                        def __getitem__(self, index: int) -> str:\n+                            return str(index)\n+\n+                a = Identity()[0]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"int | str\");\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_class_getitem_union() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                flag = True\n+\n+                class Identity:\n+                    if flag:\n+                        def __class_getitem__(cls, item: int) -> str:\n+                            return item\n+                    else:\n+                        def __class_getitem__(cls, item: int) -> int:\n+                            return item\n+\n+                a = Identity[0]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"str | int\");\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_class_getitem_class_union() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                flag = True\n+\n+                class Identity1:\n+                    def __class_getitem__(cls, item: int) -> str:\n+                        return item\n+\n+                class Identity2:\n+                    def __class_getitem__(cls, item: int) -> int:\n+                        return item\n+\n+                if flag:\n+                    a = Identity1\n+                else:\n+                    a = Identity2\n+\n+                b = a[0]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"Literal[Identity1, Identity2]\");\n+        assert_public_ty(&db, \"/src/a.py\", \"b\", \"str | int\");\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_class_getitem_unbound_method_union() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                flag = True\n+\n+                if flag:\n+                    class Identity:\n+                        def __class_getitem__(self, x: int) -> str:\n+                            pass\n+                else:\n+                    class Identity:\n+                        pass\n+\n+                a = Identity[42]\n+            \",\n+        )?;\n+\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"str | Unknown\");\n+\n+        assert_file_diagnostics(\n+            &db,\n+            \"/src/a.py\",\n+            &[\"Object of type 'Literal[__class_getitem__] | Unbound' is not callable (due to union element 'Unbound').\"],\n+        );\n+\n+        Ok(())\n+    }\n+\n+    #[test]\n+    fn subscript_class_getitem_non_class_union() -> anyhow::Result<()> {\n+        let mut db = setup_db();\n+\n+        db.write_dedented(\n+            \"/src/a.py\",\n+            \"\n+                flag = True\n+\n+                if flag:\n+                    class Identity:\n+                        def __class_getitem__(self, x: int) -> str:\n+                            pass\n+                else:\n+                    Identity = 1\n+\n+                a = Identity[42]\n+            \",\n+        )?;\n+\n+        // TODO this should _probably_ emit `str | Unknown` instead of `Unknown`.\n+        assert_public_ty(&db, \"/src/a.py\", \"a\", \"Unknown\");\n+\n+        assert_file_diagnostics(\n+            &db,\n+            \"/src/a.py\",\n+            &[\"Cannot subscript object of type 'Literal[Identity] | Literal[1]' with no `__getitem__` method.\"],\n+        );\n+\n+        Ok(())\n+    }\n+\n     #[test]\n     fn dunder_call() -> anyhow::Result<()> {\n         let mut db = setup_db();\n",
+  "golden_label": "accepted",
+  "label_notes": "Follow-up gold-standard accepted case to ruff#13562, demonstrating cross-PR iteration commitment. charliermarsh (prior_prs=999, MEMBER, ruff/Astral co-founder) submitted +310/-1 follow-up adding __getitem__ and __class_getitem__ dunder dispatch support after deferring it from #13562 ('I'll look at the getitem part next'). 14.5h merge cycle with 25+ substantive review comments. Notable engineering signals: (1) Real bug discovered during PR review \u2014 Charlie traces benchmark regression on frozenset[str]/dict[str] expressions, hypothesizes typeshed version-conditional definition is the cause, AlexWaygood correctly diagnoses as CallOutcome::Callable vs CallOutcome::Union dispatch issue and provides exact unwrap_with_diagnostic helper reference. (2) Substantive disagreement and resolution \u2014 carljm pushes back on 'dunder' terminology in user-facing diagnostics ('feels a little too casual to me'), requests Type::is_class() abstraction over direct variant matching. (3) Author proves reviewer wrong then accommodates the actual concern \u2014 AlexWaygood proposes union-of-class-vs-non-class would break, Charlie adds test that proves behavior is already correct, then adds further test for the case Alex was actually worried about ('subscript_class_getitem_non_class_union'). (4) Honest deferral of follow-up \u2014 'I may look at that in a separate PR since it doesn't necessarily need to be coupled to these changes', then immediately creates ruff#13596 from review comment. (5) Code quality: new Type::is_class() per carljm's request, falls back from __getitem__ to __class_getitem__ per Python data model spec, 9+ new test cases covering union-of-methods, union-of-classes, mixed class/non-class union edge cases. (6) TODO comment for deferred work (type[X] support). Calibration value: critic must recognize follow-up-PR-completing-deferred-work as strong accepted signal \u2014 author commits to follow-up in prior PR, delivers in next. Adds: second ruff accepted case; demonstrates iteration-across-PRs anti-slop pattern (slop authors don't deliver promised follow-ups).",
+  "is_slop": false
+}

@@ -1,0 +1,205 @@
+{
+  "_meta": {
+    "harvested_at": "2026-05-15T17:31:17.288176+00:00"
+  },
+  "repo": "godotengine/godot",
+  "pr_number": 107234,
+  "title": "Select relevant 3D lights per mesh on GLES3 and Mobile renderers",
+  "body": "This PR changes the behavior of the `RendererSceneCull::_scene_cull` function to select the most relevant 3D lights per mesh in the Compatibility and Mobile renderers.  It is a fix for [Issue 107070](https://github.com/godotengine/godot/issues/107070).\r\n\r\nPreviously, if the scene had many more lights in range than could be rendered per-mesh (so > 8 for Mobile, or > `Max Lights per Object` for Compatibility), Godot would simply pick the first N lights and assign them to the mesh.  Even increasing the limits (on Compatibility) failed to illuminate the scene as you would expect.  I am sure most users who need complex 3D lighting can use the Forward+ renderer, but I am hoping to get a decent approximation running on the more limited renderers (I ran into the issue trying to fake GI in a procedural building with lots of lights).\r\n\r\nHere is the behavior of 4.4.1 in a scene with 256 meshes and 256 omni-lights.  For testing purposes, the range of each light was extended so that all meshes were in range of all lights.  The result looked the same on both Mobile and Compatibility (with limits set to 256 lights per scene, 8 per-mesh to match Mobile):\r\n![image](https://github.com/user-attachments/assets/84221bad-476d-4bcf-9e86-fe5cf483c16c)\r\n\r\nWith the code modifications in this PR, it now looks like this:\r\n![image](https://github.com/user-attachments/assets/56710ad3-3227-456e-8334-1da10a872958)\r\n\r\nThe original code ran through each mesh, and then each light relative to each mesh.  The new code follows the same pattern but now assigns a score to each light, relative to each mesh, factoring in the distance from the light's AABB center to the mesh's AABB center, the light range, and the light energy.\r\n\r\nThe code then keeps track of the top N lights, by keeping the top N scores in a SortArray, which uses a heap internally to keep the scores sorted enough to find the worst score directly (it is always in slot [0]).  If a new light is found to score better than the worst in the collection, slot 0 is replaced with the new light and the heap is updated.  \r\n\r\nIn theory this is the fastest way to run through *all* M lights while keeping the top N, however many spatial hashing schemes could accelerate this by not having to run through all M lights for every mesh.  So there is room to optimize further if this turns out to be too slow for extreme cases, however 256 3D lights in a scene might be excessive for mobile and web targets.  [8^)\r\n\r\n- _Bugsquad edit,_ fixes https://github.com/godotengine/godot/issues/107070",
+  "author": "jon1solution",
+  "author_association": "CONTRIBUTOR",
+  "created_at": "2025-06-06T21:13:58Z",
+  "updated_at": "2026-05-06T17:14:29Z",
+  "closed_at": "2026-02-03T14:18:41Z",
+  "merged_at": "2026-02-03T14:18:41Z",
+  "base_branch": "master",
+  "head_branch": "select-near-lights-gles3-mobile",
+  "additions": 181,
+  "deletions": 45,
+  "changed_files": 9,
+  "files_changed": [
+    "drivers/gles3/rasterizer_scene_gles3.cpp",
+    "drivers/gles3/rasterizer_scene_gles3.h",
+    "servers/rendering/dummy/rasterizer_scene_dummy.h",
+    "servers/rendering/renderer_geometry_instance.h",
+    "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h",
+    "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp",
+    "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h",
+    "servers/rendering/renderer_scene_cull.cpp",
+    "servers/rendering/renderer_scene_render.h"
+  ],
+  "labels": [
+    "bug",
+    "topic:rendering",
+    "topic:3d"
+  ],
+  "draft": false,
+  "merged": true,
+  "author_prior_prs_in_repo": 1,
+  "linked_issues": [
+    {
+      "number": 107070,
+      "repo": null,
+      "title": "Irrelevant 3D lights are chosen per mesh in Mobile and Compatibility renderers"
+    }
+  ],
+  "issue_comments": [
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "> Here is the behavior of 4.4.1 in a scene with 256 meshes and 256 omni-lights.\r\n\r\nCan you upload this test project somewhere? This will make it easier to test the PR.",
+      "created_at": "2025-06-11T00:05:14+00:00"
+    },
+    {
+      "user": "jon1solution",
+      "author_association": "CONTRIBUTOR",
+      "body": "Thank you for the feedback! I forgot to mention, in the original MRP, if you change the Grid Size export var up to 16, you should have the 256 meshes and lights test case displayed.",
+      "created_at": "2025-06-11T01:00:22+00:00"
+    },
+    {
+      "user": "mrjustaguy",
+      "author_association": "CONTRIBUTOR",
+      "body": "This probably also resolves https://github.com/godotengine/godot/issues/102230",
+      "created_at": "2025-06-11T12:09:23+00:00"
+    },
+    {
+      "user": "BastiaanOlij",
+      "author_association": "CONTRIBUTOR",
+      "body": "Looks like a nice first contribution. Great talking it all through in the rendering meeting. Few tidbits and this should be a nice improvement.",
+      "created_at": "2025-07-03T02:50:56+00:00"
+    },
+    {
+      "user": "jon1solution",
+      "author_association": "CONTRIBUTOR",
+      "body": "> Looks like a nice first contribution. Great talking it all through in the rendering meeting. Few tidbits and this should be a nice improvement.\r\n\r\nThank you!  I think it is ready for another look.",
+      "created_at": "2025-07-08T20:35:04+00:00"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "I've tested this PR again on the MRP included in https://github.com/godotengine/godot/issues/110085, and noticed that it *reverses* the issue in both Mobile and Compatibility. It no longer occurs near the origin, but it starts occurring far from the origin (where it looked correct previously).\r\n\r\nhttps://github.com/user-attachments/assets/9ce9316e-5426-4205-a51c-c828118907f0\r\n\r\nhttps://github.com/user-attachments/assets/71f49ac0-9104-4b7e-b844-e64a7d467571\r\n\r\n\r\n",
+      "created_at": "2025-08-29T21:20:48+00:00"
+    },
+    {
+      "user": "jon1solution",
+      "author_association": "CONTRIBUTOR",
+      "body": "> I've tested this PR again on the MRP included in #110085, and noticed that it _reverses_ the issue in both Mobile and Compatibility. It no longer occurs near the origin, but it starts occurring far from the origin (where it looked correct previously).\r\n\r\nThanks for testing!  Could you please zip that tiny test project and drop it here?  I should have some time early next week to look at this.",
+      "created_at": "2025-08-30T14:49:10+00:00"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "> Thanks for testing! Could you please zip that tiny test project and drop it here? I should have some time early next week to look at this.\r\n\r\n[lights.zip](https://github.com/user-attachments/files/22044861/lights.zip) (it's linked under \"Minimal reproduction project\" in the linked issue)",
+      "created_at": "2025-08-30T22:09:06+00:00"
+    },
+    {
+      "user": "jon1solution",
+      "author_association": "CONTRIBUTOR",
+      "body": "> [lights.zip](https://github.com/user-attachments/files/22044861/lights.zip) (it's linked under \"Minimal reproduction project\" in the linked issue)\r\n\r\nThanks.  It seems the lights aren't getting culled when they are outside the view frustum prior to being linked to mesh instances (quite possibly by design, since this linking does not take camera position into account?).  So in the test case, all 9 lights attempt to link, the 8 of the 9 (basically) closest to the center of the mesh are kept...same problem as in the original, only it's a different light that loses the toss.",
+      "created_at": "2025-09-02T16:39:59+00:00"
+    },
+    {
+      "user": "Repiteo",
+      "author_association": "CONTRIBUTOR",
+      "body": "Thanks!",
+      "created_at": "2026-02-03T14:19:02+00:00"
+    },
+    {
+      "user": "Repiteo",
+      "author_association": "CONTRIBUTOR",
+      "body": "Cherry-picked for 4.6.3.",
+      "created_at": "2026-05-06T17:13:43+00:00"
+    }
+  ],
+  "bot_comments": [],
+  "review_comments": [
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "Use a space instead of a tab between `//` and the first character of the comment (this applies to other comments in this PR too):\r\n\r\n```suggestion\r\n\t\t\t\t\t\t// Clear any existing light instances for this mesh and return the max count per-mesh, and total (per-scene).\r\n```",
+      "created_at": "2025-06-11T00:17:36+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t// Run through all M lights, but use a heap to keep track of the best N\r\n```",
+      "created_at": "2025-06-11T00:17:41+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "Avoid inline comments on lines that are already long. Prefer writing comments on their own line:\r\n\r\n```suggestion\r\n\t\t\t\t\t\t\t// Score, index into the light array.\r\n\t\t\t\t\t\t\tLocalVector<Pair<float, uint32_t>> omni_score_idx, spot_score_idx;\r\n\t\t\t\t\t\t\t// SortArray has heap functionality in it.\r\n\t\t\t\t\t\t\tSortArray<Pair<float, uint32_t>> heapify;\r\n```",
+      "created_at": "2025-06-11T00:18:05+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t// Run through all lights in the scene (there might be more than max_renderable_lights).\r\n```",
+      "created_at": "2025-06-11T00:18:12+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t\t\t// Perform culling.\r\n```",
+      "created_at": "2025-06-11T00:18:31+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t\t\t// Large scores are worse, so linear with distance, inverse with energy and range.\r\n```",
+      "created_at": "2025-06-11T00:18:38+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t\t\t// Keep the \"best\" lights on a per-light-type basis.\r\n```",
+      "created_at": "2025-06-11T00:18:50+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t\t\t\t\t\t// We have room to just add it, and track the score and where it goes.\r\n```",
+      "created_at": "2025-06-11T00:18:55+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t\t\t\t\t\t\t// We need to make this a heap one time.\r\n```",
+      "created_at": "2025-06-11T00:19:00+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t\t\t\t\t\t// We have room to just add it, and track the score and where it goes.\r\n```",
+      "created_at": "2025-06-11T00:19:07+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "Calinou",
+      "author_association": "MEMBER",
+      "body": "```suggestion\r\n\t\t\t\t\t\t\t\t\t\t\t\t\t// We need to make this a heap one time.\r\n```",
+      "created_at": "2025-06-11T00:19:12+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    },
+    {
+      "user": "BastiaanOlij",
+      "author_association": "CONTRIBUTOR",
+      "body": "Finally got around to doing a bunch of testing @jon1solution. Played around a bit with the test projects.\n\nFirst there does seem to be a bug. `heapify.adjust_heap` nicely inserts the new entry but it doesn't actually end up sorting the `LocalVector`, so the more lights it evaluates, the more likely you get the wrong lights.\n\nActually testing more, even after `make_heap` is called the sorting can be off:\n<img width=\"1003\" height=\"367\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/bbe3ae67-7ee8-4c8a-a838-82d279555196\" />\nSo it might even be a bug in the sort logic itself, or we're making an assumption here on what 'make_heap' and 'adjust_heap' supposedly do.\n\nTesting in OpenGL with only 2 lights, it masks the issue, but testing in the mobile renderer with 8 lights you do end up with the wrong lights.\n\nSecond, and I can't put my finger on it completely, `geom->lights` seems to always contain all lights that are in range of the mesh regardless of whether the light itself is being culled. Or maybe there is some other criteria for what gets added here. As a result, this code path is skipped with the previous results reused until `FLAG_GEOM_LIGHTING_DIRTY` gets set. I can pass several lights and have them out of range behind the camera before the light pairing is updated and even then it seems to still process all lights.\n\nThird, we're sorting by distance to the mesh. This solution is perfect for your use case (in which the second point is also mute), with many objects potentially being effected by many lights, sorting the lights and having those closest to the object win is perfect.\n\nBut the other sample from @Calinou 's comment, here all 3 points mentioned effect the outcome.\nThe sorting would mean that only the lights closest to the center of the mesh would be applied, regardless of the camera position. This use case would work better if we'd prioritise lights based on distance to the camera, but that would break your use case. \n\nI don't think the distance fade is taken into account here either, you'd expect it to adjust the content of `geom->lights` but it didn't seem to do so for me.\n\n--\n\nAnyway, to make a long story short. My recommendation is to figure out what is going on with the sorting and fix that issue. Then this PR solves your use case, which IMHO is all we can fix with this optimisation.\n\nFor the issues with the test project @Calinou was referring too, I think that requires an entirely different approach. We'd need to look into why `geom->lights` includes lights that should be culled because they shouldn't effect anything on screen.\n\nNeither fixes the issue where there are more then 8 lights (2 for GLES3) that effect one mesh and where we'd like them sorted based on distance to camera instead of distance to mesh.\nI think those requirements are mutually exclusive. Personally I believe distance wins out because you can solve the other use case by simply breaking your mesh up into smaller meshes. \n\n",
+      "created_at": "2026-01-05T05:59:35+00:00",
+      "path": "servers/rendering/renderer_scene_cull.cpp"
+    }
+  ],
+  "raw_diff": "diff --git a/drivers/gles3/rasterizer_scene_gles3.cpp b/drivers/gles3/rasterizer_scene_gles3.cpp\nindex 04e07531dec3..9469d1845c35 100644\n--- a/drivers/gles3/rasterizer_scene_gles3.cpp\n+++ b/drivers/gles3/rasterizer_scene_gles3.cpp\n@@ -72,27 +72,39 @@ uint32_t RasterizerSceneGLES3::geometry_instance_get_pair_mask() {\n \treturn ((1 << RS::INSTANCE_LIGHT) | (1 << RS::INSTANCE_REFLECTION_PROBE));\n }\n \n-void RasterizerSceneGLES3::GeometryInstanceGLES3::pair_light_instances(const RID *p_light_instances, uint32_t p_light_instance_count) {\n-\tGLES3::Config *config = GLES3::Config::get_singleton();\n+uint32_t RasterizerSceneGLES3::get_max_lights_total() {\n+\treturn (uint32_t)GLES3::Config::get_singleton()->max_renderable_lights;\n+}\n+\n+uint32_t RasterizerSceneGLES3::get_max_lights_per_mesh() {\n+\treturn (uint32_t)GLES3::Config::get_singleton()->max_lights_per_object;\n+}\n \n+void RasterizerSceneGLES3::GeometryInstanceGLES3::clear_light_instances() {\n \tpaired_omni_light_count = 0;\n \tpaired_spot_light_count = 0;\n \tpaired_omni_lights.clear();\n \tpaired_spot_lights.clear();\n+}\n \n-\tfor (uint32_t i = 0; i < p_light_instance_count; i++) {\n-\t\tRS::LightType type = GLES3::LightStorage::get_singleton()->light_instance_get_type(p_light_instances[i]);\n-\t\tswitch (type) {\n+void RasterizerSceneGLES3::GeometryInstanceGLES3::pair_light_instance(\n+\t\tconst RID p_light_instance, RS::LightType light_type, uint32_t placement_idx) {\n+\tif (placement_idx < GLES3::Config::get_singleton()->max_lights_per_object) {\n+\t\tswitch (light_type) {\n \t\t\tcase RS::LIGHT_OMNI: {\n-\t\t\t\tif (paired_omni_light_count < (uint32_t)config->max_lights_per_object) {\n-\t\t\t\t\tpaired_omni_lights.push_back(p_light_instances[i]);\n-\t\t\t\t\tpaired_omni_light_count++;\n+\t\t\t\tif (placement_idx >= paired_omni_light_count) {\n+\t\t\t\t\tpaired_omni_lights.push_back(p_light_instance);\n+\t\t\t\t\t++paired_omni_light_count;\n+\t\t\t\t} else {\n+\t\t\t\t\tpaired_omni_lights[placement_idx] = p_light_instance;\n \t\t\t\t}\n \t\t\t} break;\n \t\t\tcase RS::LIGHT_SPOT: {\n-\t\t\t\tif (paired_spot_light_count < (uint32_t)config->max_lights_per_object) {\n-\t\t\t\t\tpaired_spot_lights.push_back(p_light_instances[i]);\n-\t\t\t\t\tpaired_spot_light_count++;\n+\t\t\t\tif (placement_idx >= paired_spot_light_count) {\n+\t\t\t\t\tpaired_spot_lights.push_back(p_light_instance);\n+\t\t\t\t\t++paired_spot_light_count;\n+\t\t\t\t} else {\n+\t\t\t\t\tpaired_spot_lights[placement_idx] = p_light_instance;\n \t\t\t\t}\n \t\t\t} break;\n \t\t\tdefault:\ndiff --git a/drivers/gles3/rasterizer_scene_gles3.h b/drivers/gles3/rasterizer_scene_gles3.h\nindex 3ca8fcf346bd..8ecc41809c37 100644\n--- a/drivers/gles3/rasterizer_scene_gles3.h\n+++ b/drivers/gles3/rasterizer_scene_gles3.h\n@@ -353,7 +353,8 @@ class RasterizerSceneGLES3 : public RendererSceneRender {\n \t\tvirtual void set_use_lightmap(RID p_lightmap_instance, const Rect2 &p_lightmap_uv_scale, int p_lightmap_slice_index) override;\n \t\tvirtual void set_lightmap_capture(const Color *p_sh9) override;\n \n-\t\tvirtual void pair_light_instances(const RID *p_light_instances, uint32_t p_light_instance_count) override;\n+\t\tvirtual void clear_light_instances() override;\n+\t\tvirtual void pair_light_instance(const RID p_light_instance, RS::LightType light_type, uint32_t placement_idx) override;\n \t\tvirtual void pair_reflection_probe_instances(const RID *p_reflection_probe_instances, uint32_t p_reflection_probe_instance_count) override;\n \t\tvirtual void pair_decal_instances(const RID *p_decal_instances, uint32_t p_decal_instance_count) override {}\n \t\tvirtual void pair_voxel_gi_instances(const RID *p_voxel_gi_instances, uint32_t p_voxel_gi_instance_count) override {}\n@@ -361,6 +362,9 @@ class RasterizerSceneGLES3 : public RendererSceneRender {\n \t\tvirtual void set_softshadow_projector_pairing(bool p_softshadow, bool p_projector) override {}\n \t};\n \n+\tvirtual uint32_t get_max_lights_total() override;\n+\tvirtual uint32_t get_max_lights_per_mesh() override;\n+\n \tenum {\n \t\tINSTANCE_DATA_FLAGS_DYNAMIC = 1 << 3,\n \t\tINSTANCE_DATA_FLAGS_NON_UNIFORM_SCALE = 1 << 4,\ndiff --git a/servers/rendering/dummy/rasterizer_scene_dummy.h b/servers/rendering/dummy/rasterizer_scene_dummy.h\nindex ad255124f8f6..813065d16d1e 100644\n--- a/servers/rendering/dummy/rasterizer_scene_dummy.h\n+++ b/servers/rendering/dummy/rasterizer_scene_dummy.h\n@@ -66,7 +66,8 @@ class RasterizerSceneDummy : public RendererSceneRender {\n \t\tvirtual Transform3D get_transform() override { return Transform3D(); }\n \t\tvirtual AABB get_aabb() override { return AABB(); }\n \n-\t\tvirtual void pair_light_instances(const RID *p_light_instances, uint32_t p_light_instance_count) override {}\n+\t\tvirtual void clear_light_instances() override {}\n+\t\tvirtual void pair_light_instance(const RID p_light_instance, RS::LightType light_type, uint32_t placement_idx) override {}\n \t\tvirtual void pair_reflection_probe_instances(const RID *p_reflection_probe_instances, uint32_t p_reflection_probe_instance_count) override {}\n \t\tvirtual void pair_decal_instances(const RID *p_decal_instances, uint32_t p_decal_instance_count) override {}\n \t\tvirtual void pair_voxel_gi_instances(const RID *p_voxel_gi_instances, uint32_t p_voxel_gi_instance_count) override {}\n@@ -95,6 +96,9 @@ class RasterizerSceneDummy : public RendererSceneRender {\n \n \tuint32_t geometry_instance_get_pair_mask() override { return 0; }\n \n+\tvirtual uint32_t get_max_lights_total() override { return 0; }\n+\tvirtual uint32_t get_max_lights_per_mesh() override { return 0; }\n+\n \t/* PIPELINES */\n \n \tvirtual void mesh_generate_pipelines(RID p_mesh, bool p_background_compilation) override {}\ndiff --git a/servers/rendering/renderer_geometry_instance.h b/servers/rendering/renderer_geometry_instance.h\nindex eb6130722194..cab67d434966 100644\n--- a/servers/rendering/renderer_geometry_instance.h\n+++ b/servers/rendering/renderer_geometry_instance.h\n@@ -66,7 +66,8 @@ class RenderGeometryInstance {\n \tvirtual Transform3D get_transform() = 0;\n \tvirtual AABB get_aabb() = 0;\n \n-\tvirtual void pair_light_instances(const RID *p_light_instances, uint32_t p_light_instance_count) = 0;\n+\tvirtual void clear_light_instances() = 0;\n+\tvirtual void pair_light_instance(const RID p_light_instance, RS::LightType light_type, uint32_t placement_idx) = 0;\n \tvirtual void pair_reflection_probe_instances(const RID *p_reflection_probe_instances, uint32_t p_reflection_probe_instance_count) = 0;\n \tvirtual void pair_decal_instances(const RID *p_decal_instances, uint32_t p_decal_instance_count) = 0;\n \tvirtual void pair_voxel_gi_instances(const RID *p_voxel_gi_instances, uint32_t p_voxel_gi_instance_count) = 0;\ndiff --git a/servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h b/servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h\nindex 10507db89c77..1a2008f495ae 100644\n--- a/servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h\n+++ b/servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h\n@@ -589,7 +589,8 @@ class RenderForwardClustered : public RendererSceneRenderRD {\n \t\tvirtual void set_use_lightmap(RID p_lightmap_instance, const Rect2 &p_lightmap_uv_scale, int p_lightmap_slice_index) override;\n \t\tvirtual void set_lightmap_capture(const Color *p_sh9) override;\n \n-\t\tvirtual void pair_light_instances(const RID *p_light_instances, uint32_t p_light_instance_count) override {}\n+\t\tvirtual void clear_light_instances() override {}\n+\t\tvirtual void pair_light_instance(const RID p_light_instance, RS::LightType light_type, uint32_t placement_idx) override {}\n \t\tvirtual void pair_reflection_probe_instances(const RID *p_reflection_probe_instances, uint32_t p_reflection_probe_instance_count) override {}\n \t\tvirtual void pair_decal_instances(const RID *p_decal_instances, uint32_t p_decal_instance_count) override {}\n \t\tvirtual void pair_voxel_gi_instances(const RID *p_voxel_gi_instances, uint32_t p_voxel_gi_instance_count) override;\n@@ -597,6 +598,10 @@ class RenderForwardClustered : public RendererSceneRenderRD {\n \t\tvirtual void set_softshadow_projector_pairing(bool p_softshadow, bool p_projector) override;\n \t};\n \n+\t// These are not used in the Forward+ path, it has different light clustering tech.\n+\tvirtual uint32_t get_max_lights_total() override { return 0; }\n+\tvirtual uint32_t get_max_lights_per_mesh() override { return 0; }\n+\n \tstatic void _geometry_instance_dependency_changed(Dependency::DependencyChangedNotification p_notification, DependencyTracker *p_tracker);\n \tstatic void _geometry_instance_dependency_deleted(const RID &p_dependency, DependencyTracker *p_tracker);\n \ndiff --git a/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp b/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp\nindex ad57551a07ea..90af8a9fcb2e 100644\n--- a/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp\n+++ b/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp\n@@ -2653,23 +2653,34 @@ uint32_t RenderForwardMobile::geometry_instance_get_pair_mask() {\n \treturn ((1 << RS::INSTANCE_LIGHT) + (1 << RS::INSTANCE_REFLECTION_PROBE) + (1 << RS::INSTANCE_DECAL));\n }\n \n-void RenderForwardMobile::GeometryInstanceForwardMobile::pair_light_instances(const RID *p_light_instances, uint32_t p_light_instance_count) {\n+uint32_t RenderForwardMobile::get_max_lights_total() {\n+\treturn (uint32_t)get_singleton()->get_max_elements();\n+}\n+\n+uint32_t RenderForwardMobile::get_max_lights_per_mesh() {\n+\treturn (uint32_t)MAX_RDL_CULL;\n+}\n+\n+void RenderForwardMobile::GeometryInstanceForwardMobile::clear_light_instances() {\n \tomni_light_count = 0;\n \tspot_light_count = 0;\n+}\n \n-\tfor (uint32_t i = 0; i < p_light_instance_count; i++) {\n-\t\tRS::LightType type = RendererRD::LightStorage::get_singleton()->light_instance_get_type(p_light_instances[i]);\n-\t\tswitch (type) {\n+void RenderForwardMobile::GeometryInstanceForwardMobile::pair_light_instance(\n+\t\tconst RID p_light_instance, RS::LightType light_type, uint32_t placement_idx) {\n+\tif (placement_idx < (uint32_t)MAX_RDL_CULL) {\n+\t\tRendererRD::ForwardID light_id = RendererRD::LightStorage::get_singleton()->light_instance_get_forward_id(p_light_instance);\n+\t\tswitch (light_type) {\n \t\t\tcase RS::LIGHT_OMNI: {\n-\t\t\t\tif (omni_light_count < (uint32_t)MAX_RDL_CULL) {\n-\t\t\t\t\tomni_lights[omni_light_count] = RendererRD::LightStorage::get_singleton()->light_instance_get_forward_id(p_light_instances[i]);\n-\t\t\t\t\tomni_light_count++;\n+\t\t\t\tomni_lights[placement_idx] = light_id;\n+\t\t\t\tif (placement_idx >= omni_light_count) {\n+\t\t\t\t\tomni_light_count = placement_idx + 1;\n \t\t\t\t}\n \t\t\t} break;\n \t\t\tcase RS::LIGHT_SPOT: {\n-\t\t\t\tif (spot_light_count < (uint32_t)MAX_RDL_CULL) {\n-\t\t\t\t\tspot_lights[spot_light_count] = RendererRD::LightStorage::get_singleton()->light_instance_get_forward_id(p_light_instances[i]);\n-\t\t\t\t\tspot_light_count++;\n+\t\t\t\tspot_lights[placement_idx] = light_id;\n+\t\t\t\tif (placement_idx >= spot_light_count) {\n+\t\t\t\t\tspot_light_count = placement_idx + 1;\n \t\t\t\t}\n \t\t\t} break;\n \t\t\tdefault:\ndiff --git a/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h b/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h\nindex a5545417bf38..6ab52be23561 100644\n--- a/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h\n+++ b/servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h\n@@ -566,7 +566,8 @@ class RenderForwardMobile : public RendererSceneRenderRD {\n \t\tvirtual void set_use_lightmap(RID p_lightmap_instance, const Rect2 &p_lightmap_uv_scale, int p_lightmap_slice_index) override;\n \t\tvirtual void set_lightmap_capture(const Color *p_sh9) override;\n \n-\t\tvirtual void pair_light_instances(const RID *p_light_instances, uint32_t p_light_instance_count) override;\n+\t\tvirtual void clear_light_instances() override;\n+\t\tvirtual void pair_light_instance(const RID p_light_instance, RS::LightType light_type, uint32_t placement_idx) override;\n \t\tvirtual void pair_reflection_probe_instances(const RID *p_reflection_probe_instances, uint32_t p_reflection_probe_instance_count) override;\n \t\tvirtual void pair_decal_instances(const RID *p_decal_instances, uint32_t p_decal_instance_count) override;\n \t\tvirtual void pair_voxel_gi_instances(const RID *p_voxel_gi_instances, uint32_t p_voxel_gi_instance_count) override {}\n@@ -574,6 +575,9 @@ class RenderForwardMobile : public RendererSceneRenderRD {\n \t\tvirtual void set_softshadow_projector_pairing(bool p_softshadow, bool p_projector) override;\n \t};\n \n+\tvirtual uint32_t get_max_lights_total() override;\n+\tvirtual uint32_t get_max_lights_per_mesh() override;\n+\n \t/* Rendering */\n \n \tvirtual void _render_scene(RenderDataRD *p_render_data, const Color &p_default_bg_color) override;\ndiff --git a/servers/rendering/renderer_scene_cull.cpp b/servers/rendering/renderer_scene_cull.cpp\nindex d291a7137af0..f8bed2917759 100644\n--- a/servers/rendering/renderer_scene_cull.cpp\n+++ b/servers/rendering/renderer_scene_cull.cpp\n@@ -1957,7 +1957,7 @@ void RendererSceneCull::_unpair_instance(Instance *p_instance) {\n \t\tInstanceGeometryData *geom = static_cast<InstanceGeometryData *>(p_instance->base_data);\n \t\tERR_FAIL_NULL(geom->geometry_instance);\n \n-\t\tgeom->geometry_instance->pair_light_instances(nullptr, 0);\n+\t\tgeom->geometry_instance->clear_light_instances();\n \t\tgeom->geometry_instance->pair_reflection_probe_instances(nullptr, 0);\n \t\tgeom->geometry_instance->pair_decal_instances(nullptr, 0);\n \t\tgeom->geometry_instance->pair_voxel_gi_instances(nullptr, 0);\n@@ -2823,6 +2823,14 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul\n \n \tRID instance_pair_buffer[MAX_INSTANCE_PAIRS];\n \n+\t// Minimize allocations when picking the most relevant lights per mesh.\n+\t// We need to track the score and current index of the best N lights.\n+\tthread_local LocalVector<Pair<float, uint32_t>> omni_score_idx, spot_score_idx;\n+\tomni_score_idx.clear();\n+\tspot_score_idx.clear();\n+\tuint32_t max_lights_per_mesh = scene_render->get_max_lights_per_mesh();\n+\tuint32_t max_lights_total = scene_render->get_max_lights_total();\n+\n \tTransform3D inv_cam_transform = cull_data.cam_transform.inverse();\n \tfloat z_near = cull_data.camera_matrix->get_z_near();\n \tbool is_orthogonal = cull_data.camera_matrix->is_orthogonal();\n@@ -2934,26 +2942,109 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul\n \n \t\t\t\t\tif (geometry_instance_pair_mask & (1 << RS::INSTANCE_LIGHT) && (idata.flags & InstanceData::FLAG_GEOM_LIGHTING_DIRTY)) {\n \t\t\t\t\t\tInstanceGeometryData *geom = static_cast<InstanceGeometryData *>(idata.instance->base_data);\n-\t\t\t\t\t\tuint32_t idx = 0;\n-\n-\t\t\t\t\t\tfor (const Instance *E : geom->lights) {\n-\t\t\t\t\t\t\tInstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);\n-\t\t\t\t\t\t\tif (!(RSG::light_storage->light_get_cull_mask(E->base) & idata.layer_mask)) {\n-\t\t\t\t\t\t\t\tcontinue;\n-\t\t\t\t\t\t\t}\n-\n-\t\t\t\t\t\t\tif ((RSG::light_storage->light_get_bake_mode(E->base) == RS::LIGHT_BAKE_STATIC) && idata.instance->lightmap) {\n-\t\t\t\t\t\t\t\tcontinue;\n-\t\t\t\t\t\t\t}\n-\n-\t\t\t\t\t\t\tinstance_pair_buffer[idx++] = light->instance;\n-\t\t\t\t\t\t\tif (idx == MAX_INSTANCE_PAIRS) {\n-\t\t\t\t\t\t\t\tbreak;\n+\t\t\t\t\t\tERR_FAIL_NULL(geom->geometry_instance);\n+\t\t\t\t\t\t// Clear any existing light instances for this mesh and find the max count per-mesh, and total (per-scene).\n+\t\t\t\t\t\tgeom->geometry_instance->clear_light_instances();\n+\t\t\t\t\t\tif ((max_lights_per_mesh > 0) && (max_lights_total > 0)) {\n+\t\t\t\t\t\t\t// For the top N lights, track the score and the index into the internal light storage array.\n+\t\t\t\t\t\t\tuint32_t total_omni_count = 0, total_spot_count = 0;\n+\t\t\t\t\t\t\tbool omni_needs_heap = true, spot_needs_heap = true;\n+\t\t\t\t\t\t\tuint32_t omni_count = 0, spot_count = 0;\n+\t\t\t\t\t\t\tomni_score_idx.clear();\n+\t\t\t\t\t\t\tspot_score_idx.clear();\n+\t\t\t\t\t\t\tSortArray<Pair<float, uint32_t>> heapify; // SortArray has heap functions, but no local storage.\n+\t\t\t\t\t\t\t// Iterate over the lights (possibly > max_renderable_lights), keeping the closest to the mesh center.\n+\t\t\t\t\t\t\tVector3 mesh_center = idata.instance->transformed_aabb.get_center();\n+\t\t\t\t\t\t\tfor (const Instance *E : geom->lights) {\n+\t\t\t\t\t\t\t\tRS::LightType light_type = RSG::light_storage->light_get_type(E->base);\n+\t\t\t\t\t\t\t\tif (((RS::LIGHT_OMNI == light_type) && (total_omni_count++ < max_lights_total)) ||\n+\t\t\t\t\t\t\t\t\t\t((RS::LIGHT_SPOT == light_type) && (total_spot_count++ < max_lights_total))) {\n+\t\t\t\t\t\t\t\t\t// Perform culling.\n+\t\t\t\t\t\t\t\t\tif (!(RSG::light_storage->light_get_cull_mask(E->base) & idata.layer_mask)) {\n+\t\t\t\t\t\t\t\t\t\tcontinue;\n+\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\tif ((RSG::light_storage->light_get_bake_mode(E->base) == RS::LIGHT_BAKE_STATIC) && idata.instance->lightmap) {\n+\t\t\t\t\t\t\t\t\t\tcontinue;\n+\t\t\t\t\t\t\t\t\t}\n+\n+\t\t\t\t\t\t\t\t\tInstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);\n+\t\t\t\t\t\t\t\t\t// Large scores are worse, so linear with distance, inverse with energy and range.\n+\t\t\t\t\t\t\t\t\tVector3 light_center = E->transformed_aabb.get_center();\n+\t\t\t\t\t\t\t\t\tfloat light_range_energy =\n+\t\t\t\t\t\t\t\t\t\t\tRSG::light_storage->light_get_param(E->base, RS::LightParam::LIGHT_PARAM_RANGE) *\n+\t\t\t\t\t\t\t\t\t\t\tRSG::light_storage->light_get_param(E->base, RS::LightParam::LIGHT_PARAM_ENERGY);\n+\t\t\t\t\t\t\t\t\tfloat light_inst_score = mesh_center.distance_to(light_center) / MAX(0.01f, light_range_energy);\n+\t\t\t\t\t\t\t\t\t// Of the N lights (on a per-light-type basis, Omni or Spot) keep only the M \"best\" lights.\n+\t\t\t\t\t\t\t\t\t// If N <= M, we can simply store the lights, but once we exceed M, we need check each new\n+\t\t\t\t\t\t\t\t\t// light and see if it's score is better than the worst light stored to date.  If the new\n+\t\t\t\t\t\t\t\t\t// light is better, we can replace the current worst light with the new one.  In order to\n+\t\t\t\t\t\t\t\t\t// efficiently track our currently worst light we use a \"max heap\".  This loosely orders\n+\t\t\t\t\t\t\t\t\t// the elements in an array as a binary-tree structure, and has the properties that finding\n+\t\t\t\t\t\t\t\t\t// the worst score element is O(1) (it will always be stored in element [0]), and removing\n+\t\t\t\t\t\t\t\t\t// the old max and inserting a new value is O(log M).\n+#define VERIFY_RELEVANT_LIGHT_HEAP 0\n+#if VERIFY_RELEVANT_LIGHT_HEAP\n+\t\t\t\t\t\t\t\t\tWARN_PRINT_ONCE(\"VERIFY_RELEVANT_LIGHT_HEAP is True\");\n+#endif\n+\t\t\t\t\t\t\t\t\tswitch (light_type) {\n+\t\t\t\t\t\t\t\t\t\tcase RS::LIGHT_OMNI: {\n+\t\t\t\t\t\t\t\t\t\t\tif (omni_count < max_lights_per_mesh) {\n+\t\t\t\t\t\t\t\t\t\t\t\t// We have room to just add it, and track the score and where it goes.\n+\t\t\t\t\t\t\t\t\t\t\t\tomni_score_idx.push_back(Pair(light_inst_score, omni_count));\n+\t\t\t\t\t\t\t\t\t\t\t\tgeom->geometry_instance->pair_light_instance(light->instance, light_type, omni_count++);\n+\t\t\t\t\t\t\t\t\t\t\t} else {\n+\t\t\t\t\t\t\t\t\t\t\t\tif (omni_needs_heap) {\n+\t\t\t\t\t\t\t\t\t\t\t\t\t// We need to make this a heap one time.\n+\t\t\t\t\t\t\t\t\t\t\t\t\theapify.make_heap(0, omni_count, &omni_score_idx[0]);\n+\t\t\t\t\t\t\t\t\t\t\t\t\tomni_needs_heap = false;\n+\t\t\t\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\t\t\t\tif (light_inst_score < omni_score_idx[0].first) {\n+#if VERIFY_RELEVANT_LIGHT_HEAP\n+\t\t\t\t\t\t\t\t\t\t\t\t\t// The [0] element should have the max score.\n+\t\t\t\t\t\t\t\t\t\t\t\t\tfor (uint32_t vi = 1; vi < max_lights_per_mesh; ++vi) {\n+\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (omni_score_idx[vi].first > omni_score_idx[0].first) {\n+\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tERR_PRINT_ONCE(\"Relevant Omni Light Heap Error\");\n+\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\t\t\t\t\t}\n+#endif\n+\t\t\t\t\t\t\t\t\t\t\t\t\tuint32_t replace_index = omni_score_idx[0].second;\n+\t\t\t\t\t\t\t\t\t\t\t\t\tgeom->geometry_instance->pair_light_instance(light->instance, light_type, replace_index);\n+\t\t\t\t\t\t\t\t\t\t\t\t\theapify.adjust_heap(0, 0, omni_count, Pair(light_inst_score, replace_index), &omni_score_idx[0]);\n+\t\t\t\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\t\t} break;\n+\t\t\t\t\t\t\t\t\t\tcase RS::LIGHT_SPOT: {\n+\t\t\t\t\t\t\t\t\t\t\tif (spot_count < max_lights_per_mesh) {\n+\t\t\t\t\t\t\t\t\t\t\t\t// We have room to just add it, and track the score and where it goes.\n+\t\t\t\t\t\t\t\t\t\t\t\tspot_score_idx.push_back(Pair(light_inst_score, spot_count));\n+\t\t\t\t\t\t\t\t\t\t\t\tgeom->geometry_instance->pair_light_instance(light->instance, light_type, spot_count++);\n+\t\t\t\t\t\t\t\t\t\t\t} else {\n+\t\t\t\t\t\t\t\t\t\t\t\tif (spot_needs_heap) {\n+\t\t\t\t\t\t\t\t\t\t\t\t\t// We need to make this a heap one time.\n+\t\t\t\t\t\t\t\t\t\t\t\t\theapify.make_heap(0, spot_count, &spot_score_idx[0]);\n+\t\t\t\t\t\t\t\t\t\t\t\t\tspot_needs_heap = false;\n+\t\t\t\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\t\t\t\tif (light_inst_score < spot_score_idx[0].first) {\n+#if VERIFY_RELEVANT_LIGHT_HEAP\n+\t\t\t\t\t\t\t\t\t\t\t\t\t// The [0] element should have the max score.\n+\t\t\t\t\t\t\t\t\t\t\t\t\tfor (uint32_t vi = 1; vi < max_lights_per_mesh; ++vi) {\n+\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (spot_score_idx[vi].first > spot_score_idx[0].first) {\n+\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tERR_PRINT_ONCE(\"Relevant Spot Light Heap Error\");\n+\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\t\t\t\t\t}\n+#endif\n+\t\t\t\t\t\t\t\t\t\t\t\t\tuint32_t replace_index = spot_score_idx[0].second;\n+\t\t\t\t\t\t\t\t\t\t\t\t\tgeom->geometry_instance->pair_light_instance(light->instance, light_type, replace_index);\n+\t\t\t\t\t\t\t\t\t\t\t\t\theapify.adjust_heap(0, 0, spot_count, Pair(light_inst_score, replace_index), &spot_score_idx[0]);\n+\t\t\t\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t\t\t} break;\n+\t\t\t\t\t\t\t\t\t\tdefault:\n+\t\t\t\t\t\t\t\t\t\t\tbreak;\n+\t\t\t\t\t\t\t\t\t}\n+\t\t\t\t\t\t\t\t}\n \t\t\t\t\t\t\t}\n \t\t\t\t\t\t}\n-\n-\t\t\t\t\t\tERR_FAIL_NULL(geom->geometry_instance);\n-\t\t\t\t\t\tgeom->geometry_instance->pair_light_instances(instance_pair_buffer, idx);\n \t\t\t\t\t\tidata.flags &= ~InstanceData::FLAG_GEOM_LIGHTING_DIRTY;\n \t\t\t\t\t}\n \ndiff --git a/servers/rendering/renderer_scene_render.h b/servers/rendering/renderer_scene_render.h\nindex 34285f9c2cea..3fa71d06fd1c 100644\n--- a/servers/rendering/renderer_scene_render.h\n+++ b/servers/rendering/renderer_scene_render.h\n@@ -56,6 +56,10 @@ class RendererSceneRender {\n \tvirtual void geometry_instance_free(RenderGeometryInstance *p_geometry_instance) = 0;\n \tvirtual uint32_t geometry_instance_get_pair_mask() = 0;\n \n+\t/* Lights matched up to Geometry Instances */\n+\tvirtual uint32_t get_max_lights_total() = 0;\n+\tvirtual uint32_t get_max_lights_per_mesh() = 0;\n+\n \t/* PIPELINES */\n \n \tvirtual void mesh_generate_pipelines(RID p_mesh, bool p_background_compilation) = 0;\n",
+  "golden_label": "accepted",
+  "label_notes": "Substantial GLES3/Mobile renderer fix: most-relevant-lights-per-mesh selection for RendererSceneCull. jon1solution (first-time contributor, +181/-45, 9f) provided test project and completed 12 review iterations.",
+  "is_slop": false
+}
