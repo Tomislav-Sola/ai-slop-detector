@@ -58,7 +58,5 @@
   "bot_comments": [],
   "review_comments": [],
   "raw_diff": "diff --git a/editor/editor_builders.py b/editor/editor_builders.py\nindex c7d04d0602c1..26f871ac6bae 100644\n--- a/editor/editor_builders.py\n+++ b/editor/editor_builders.py\n@@ -85,7 +85,7 @@ def make_translations(target, source, env):\n             # msgfmt erases non-translated messages, so avoid using it if exporting the POT.\n             if msgfmt and name != category:\n                 mo_path = os.path.join(tempfile.gettempdir(), uuid.uuid4().hex + \".mo\")\n-                cmd = f\"{msgfmt} {path} --no-hash -o {mo_path}\"\n+                cmd = f'{msgfmt} \"{path}\" --no-hash -o \"{mo_path}\"'\n                 try:\n                     subprocess.Popen(cmd, shell=True, stderr=subprocess.PIPE).communicate()\n                     buffer = methods.get_buffer(mo_path)\n",
-  "golden_label": "accepted",
-  "label_notes": "One-liner path-quoting fix: username spaces caused .mo translation generation failure in editor. AThousandShips (MEMBER, prior=449) self-discovered from personal dev environment.",
   "is_slop": false
 }
