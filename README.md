@@ -132,7 +132,7 @@ pr-triage check owner/repo 42 --max-tokens 100000
 # Run eval against the golden set (Haiku, cheap iteration)
 pr-triage eval
 
-# Run eval with Sonnet critics (production model, ~$1–2 for the full 53)
+# Run eval with Sonnet critics (production model, ~$1.50 for the full 50)
 pr-triage eval --model sonnet
 
 # Browse eval results in Streamlit
