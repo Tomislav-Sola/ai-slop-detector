@@ -1,4 +1,4 @@
-name: "ai-slop-detector"
+name: "AI Slop Detector"
 description: "Flag AI-slop pull requests using a multi-critic LangGraph + RAG pipeline."
 author: "Tomislav Sola"
 
