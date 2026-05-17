@@ -29,7 +29,7 @@ def papertriage_pr9() -> dict:
 @pytest.fixture(autouse=True)
 def reset_budget():
     """Reset the budget ContextVar before each test to prevent cross-test leakage."""
-    from pr_triage.budget import _budget_var
+    from ai_slop_detector.budget import _budget_var
     _budget_var.set(None)
     yield
     _budget_var.set(None)

@@ -1,0 +1,28 @@
+name: "ai-slop-detector"
+description: "Flag AI-slop pull requests using a multi-critic LangGraph + RAG pipeline."
+author: "Tomislav Sola"
+
+branding:
+  icon: "filter"
+  color: "purple"
+
+inputs:
+  anthropic_api_key:
+    description: "Anthropic API key. Use a repository secret; do not paste literal."
+    required: true
+  github_token:
+    description: "GitHub token used to post the slop comment. Defaults to the workflow's GITHUB_TOKEN."
+    required: false
+    default: ${{ github.token }}
+  verbose:
+    description: 'If "true", also post a "looks clean" comment on non-slop PRs. Default "false": silent on clean.'
+    required: false
+    default: "false"
+  max_tokens:
+    description: "Per-run Anthropic token budget cap. Pipeline refuses to start above this estimate."
+    required: false
+    default: "50000"
+
+runs:
+  using: "docker"
+  image: "Dockerfile"

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pr_triage.golden import GoldenBuildError, build_golden_set
+from ai_slop_detector.golden import GoldenBuildError, build_golden_set
 
 
 # ------------------------------------------------------------------

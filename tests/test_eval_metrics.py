@@ -1,7 +1,7 @@
 """Unit tests for eval.py metric computation — no LLM calls needed."""
 from __future__ import annotations
 
-from pr_triage.eval import compute_metrics, load_golden_entries, entry_to_state
+from ai_slop_detector.eval import compute_metrics, load_golden_entries, entry_to_state
 
 
 def _result(is_slop: bool, predicted: str) -> dict:

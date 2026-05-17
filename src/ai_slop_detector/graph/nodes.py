@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pr_triage.state import (
+from ai_slop_detector.state import (
     AggregateResult,
     CriticOutput,
     GuidelinesCriticOutput,
@@ -15,9 +15,9 @@ from pr_triage.state import (
 )
 
 if TYPE_CHECKING:
-    from pr_triage.claude_client import ClaudeClient
-    from pr_triage.rag import RAGIndex
-    from pr_triage.state import TriageState
+    from ai_slop_detector.claude_client import ClaudeClient
+    from ai_slop_detector.rag import RAGIndex
+    from ai_slop_detector.state import TriageState
 
 # File extensions that indicate a documentation-only or config-only changeset.
 # A PR touching only these is classified as trivial without calling Haiku.
@@ -125,7 +125,7 @@ def classify_size_node(state: TriageState, claude: ClaudeClient) -> dict:
         f"Diff (first 3000 chars):\n{diff_preview}"
     )
 
-    from pr_triage.claude_client import MODEL_HAIKU
+    from ai_slop_detector.claude_client import MODEL_HAIKU
 
     raw = claude.complete(
         messages=[{"role": "user", "content": user_msg}],
@@ -168,7 +168,7 @@ def retrieve_context_node(state: TriageState, rag: RAGIndex) -> dict:
 
 def guidelines_critic_node(state: TriageState, claude: ClaudeClient, *, model: str | None = None) -> dict:
     """Guidelines critic — Sonnet in production, overridable for eval."""
-    from pr_triage.claude_client import MODEL_SONNET
+    from ai_slop_detector.claude_client import MODEL_SONNET
 
     chunks_text = "\n\n".join(state.rag_chunks) if state.rag_chunks else "(no guideline context retrieved)"
     diff_preview = (state.raw_diff or "")[:6000]
@@ -361,7 +361,7 @@ def architecture_critic_node(state: TriageState, claude: ClaudeClient, *, model:
     First-look mode: judges from PR content + author signals + RAG. No post-hoc
     review comments or timing data.
     """
-    from pr_triage.claude_client import MODEL_SONNET
+    from ai_slop_detector.claude_client import MODEL_SONNET
 
     chunks_text = "\n\n".join(state.rag_chunks) if state.rag_chunks else "(no context retrieved)"
     diff_preview = (state.raw_diff or "")[:6000]
@@ -652,7 +652,7 @@ def _count_long_added_functions(lines: list[str]) -> int:
 
 def slop_signals_critic_node(state: TriageState, claude: ClaudeClient, *, model: str | None = None) -> dict:
     """Slop critic — Sonnet in production, overridable for eval."""
-    from pr_triage.claude_client import MODEL_SONNET
+    from ai_slop_detector.claude_client import MODEL_SONNET
 
     features = _compute_sloppiness_features(state)
     body_signals = _detect_body_signals(state.metadata.body or "")
@@ -737,7 +737,7 @@ def aggregate_node(state: TriageState) -> dict:
     Writes both aggregate_result (Phase 3) and the backward-compatible
     aggregate_verdict (Phase 2 field).
     """
-    from pr_triage.aggregator import aggregate
+    from ai_slop_detector.aggregator import aggregate
 
     result = aggregate(state.critic_outputs)
 

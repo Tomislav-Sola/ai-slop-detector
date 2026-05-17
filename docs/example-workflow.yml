@@ -1,0 +1,37 @@
+# Drop this into .github/workflows/ai-slop-detector.yml in your repository.
+#
+# Required setup:
+#   - Repository secret ANTHROPIC_API_KEY with a valid Anthropic key.
+#     Cost is billed to that key (~$0.03 per PR plus ~30-60s of indexing).
+#
+# Permissions:
+#   - pull-requests: write — required to post the slop comment.
+#   - contents: read — required to read the target PR + repo context.
+#
+# Behaviour:
+#   - Fires once on PR open and once on reopen. No re-triage on push.
+#   - Comments only when the PR looks like AI slop. Silent on clean PRs
+#     unless you set verbose: "true".
+#   - Idempotent: re-running edits the prior comment in place.
+
+name: AI-slop check
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  ai-slop-detector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Tomislav-Sola/ai-slop-detector@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional: comment on clean PRs too.
+          # verbose: "true"
+          # Optional: raise the per-run Anthropic token budget cap.
+          # max_tokens: "75000"

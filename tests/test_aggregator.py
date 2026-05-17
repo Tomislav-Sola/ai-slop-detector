@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from pr_triage.aggregator import aggregate, _VETO_CAP, _VETO_THRESHOLD
-from pr_triage.state import CriticOutput, GuidelinesCriticOutput, GuidelinesFinding
+from ai_slop_detector.aggregator import aggregate, _VETO_CAP, _VETO_THRESHOLD
+from ai_slop_detector.state import CriticOutput, GuidelinesCriticOutput, GuidelinesFinding
 
 
 def _critic(name: str, score: int) -> CriticOutput:
@@ -172,3 +172,29 @@ def test_findings_appear_in_deciding_factors():
     )
     result = aggregate([critic])
     assert any("bad code here" in f for f in result.deciding_factors)
+
+
+def test_long_evidence_not_truncated_in_deciding_factors():
+    """Regression: deciding_factors used to clip evidence at 120 chars, which
+    cut findings mid-word in PR comments. The aggregator must pass the full
+    evidence string through; consumers truncate if they need to.
+    """
+    long_evidence = (
+        "PR description explicitly states '🤖 Generated with Claude Code' "
+        "confirming automated generation with no human-authored modifications "
+        "to the body, and the diff adds an over-engineered UtilityHelper class "
+        "that wraps trivial pass-through logic."
+    )
+    assert len(long_evidence) > 200, "test premise: evidence must exceed the old 120-char cap"
+    finding = GuidelinesFinding(severity="major", category="ai_footer", evidence=long_evidence)
+    details = GuidelinesCriticOutput(score=2, findings=[finding], citations=[])
+    critic = CriticOutput(
+        critic_name="slop_signals_critic",
+        verdict="fail",
+        reasoning="ai footer + over-engineered diff",
+        confidence=0.2,
+        details=details,
+    )
+    result = aggregate([critic])
+    # The full evidence must survive into deciding_factors — no mid-word cut.
+    assert long_evidence in result.deciding_factors

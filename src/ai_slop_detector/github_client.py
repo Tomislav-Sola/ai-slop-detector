@@ -6,7 +6,7 @@ from github import Github, GithubException
 from github.PullRequest import PullRequest
 from github.Repository import Repository
 
-from pr_triage.state import PRMetadata, TriageState
+from ai_slop_detector.state import PRMetadata, TriageState
 
 _CONTRIBUTING_CANDIDATES = ["CONTRIBUTING.md", "CONTRIBUTING.rst", "CONTRIBUTING"]
 _AGENTS_CANDIDATES = ["AGENTS.md", "AGENTS.rst", "AGENTS"]

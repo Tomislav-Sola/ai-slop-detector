@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pr_triage.harvest import (
+from ai_slop_detector.harvest import (
     DiversityConfig,
     DiversityTracker,
     PRCandidate,
@@ -181,7 +181,7 @@ def test_harvest_skips_existing_file(tmp_path):
     existing.parent.mkdir(parents=True, exist_ok=True)
     existing.write_text(json.dumps({"repo": "owner/repo", "pr_number": 1}))
 
-    with patch("pr_triage.harvest.Github") as mock_gh:
+    with patch("ai_slop_detector.harvest.Github") as mock_gh:
         _setup_mock_gh(mock_gh, [_make_fake_pr(1)])
         new_count, skipped = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"], re_record=False
@@ -192,8 +192,8 @@ def test_harvest_skips_existing_file(tmp_path):
 
 
 def test_harvest_saves_new_pr(tmp_path):
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value="diff content"):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value="diff content"):
         _setup_mock_gh(mock_gh, [_make_fake_pr(7)], search_total=1)
         new_count, skipped = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"]
@@ -221,8 +221,8 @@ def test_harvest_re_record_overwrites(tmp_path):
     existing.parent.mkdir(parents=True, exist_ok=True)
     existing.write_text(json.dumps({"pr_number": 3, "title": "old"}))
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(3, title="new title")])
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"], re_record=True
@@ -234,8 +234,8 @@ def test_harvest_re_record_overwrites(tmp_path):
 
 
 def test_harvest_respects_max_prs(tmp_path):
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(i) for i in range(1, 6)])
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"], max_prs=3
@@ -252,8 +252,8 @@ def test_harvest_skips_recent_pr(tmp_path):
     recent_pr = _make_fake_pr(99, closed_at=_RECENT)
     recent_pr.raw_data = {"closed_at": _RECENT.isoformat()}
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [recent_pr])
         new_count, skipped = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"], min_age_days=14
@@ -268,8 +268,8 @@ def test_harvest_keeps_old_pr(tmp_path):
     old_pr = _make_fake_pr(88, closed_at=_OLD)
     old_pr.raw_data = {"closed_at": _OLD.isoformat()}
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [old_pr])
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"], min_age_days=14
@@ -282,8 +282,8 @@ def test_harvest_settle_filter_disabled_with_zero(tmp_path):
     recent_pr = _make_fake_pr(99, closed_at=_RECENT)
     recent_pr.raw_data = {"closed_at": _RECENT.isoformat()}
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [recent_pr])
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"], min_age_days=0
@@ -300,8 +300,8 @@ def test_harvest_fetches_linked_issue_titles(tmp_path):
     fake_pr = _make_fake_pr(10)
     fake_pr.body = "Closes #42"
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         mock_repo = _setup_mock_gh(mock_gh, [fake_pr])
         mock_issue = MagicMock()
         mock_issue.title = "Fix the thing"
@@ -320,8 +320,8 @@ def test_harvest_captures_cross_repo_url(tmp_path):
     fake_pr = _make_fake_pr(11)
     fake_pr.body = "Closes https://github.com/other-org/other-repo/issues/99"
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [fake_pr])
         harvest_repo("owner/repo", "token", tmp_path, states=["closed"])
 
@@ -354,8 +354,8 @@ def test_harvest_splits_bot_and_human_comments(tmp_path):
 
     fake_pr.get_issue_comments.return_value = [mock_human, mock_bot]
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [fake_pr])
         harvest_repo("owner/repo", "token", tmp_path, states=["closed"])
 
@@ -377,8 +377,8 @@ def test_harvest_includes_review_comments(tmp_path):
     mock_review.created_at = _OLD
     fake_pr.get_review_comments.return_value = [mock_review]
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [fake_pr])
         harvest_repo("owner/repo", "token", tmp_path, states=["closed"])
 
@@ -393,8 +393,8 @@ def test_harvest_includes_review_comments(tmp_path):
 # ------------------------------------------------------------------
 
 def test_harvest_author_prior_prs_count(tmp_path):
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(5)], search_total=4)
         harvest_repo("owner/repo", "token", tmp_path, states=["closed"])
 
@@ -405,8 +405,8 @@ def test_harvest_author_prior_prs_count(tmp_path):
 def test_harvest_author_prior_prs_none_on_api_error(tmp_path):
     fake_pr = _make_fake_pr(6)
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         mock_repo = _setup_mock_gh(mock_gh, [fake_pr])
         # Simulate search API failure
         mock_gh.return_value.search_issues.side_effect = Exception("rate limited")
@@ -417,8 +417,8 @@ def test_harvest_author_prior_prs_none_on_api_error(tmp_path):
 
 
 def test_harvest_author_prior_prs_zero_for_first_timer(tmp_path):
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(7)], search_total=1)
         harvest_repo("owner/repo", "token", tmp_path, states=["closed"])
 
@@ -433,8 +433,8 @@ def test_harvest_author_prior_prs_zero_for_first_timer(tmp_path):
 def test_harvest_closed_at_stored(tmp_path):
     fake_pr = _make_fake_pr(8, closed_at=_OLD)
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [fake_pr])
         harvest_repo("owner/repo", "token", tmp_path, states=["closed"])
 
@@ -579,8 +579,8 @@ def test_diversity_harvest_author_cap(tmp_path):
     tracker = DiversityTracker()
     tracker.author_counts["alice"] = 2  # already at cap
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(1, author="alice")])
         new_count, skipped = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],
@@ -597,8 +597,8 @@ def test_diversity_harvest_repo_cap(tmp_path):
     tracker.repo_counts["owner/repo"] = 1  # already at cap
 
     prs = [_make_fake_pr(i, author=f"user{i}") for i in range(1, 4)]
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, prs)
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],
@@ -613,8 +613,8 @@ def test_diversity_harvest_author_repo_pair_cap(tmp_path):
     tracker = DiversityTracker()
     tracker.author_repo_counts[("alice", "owner/repo")] = 1
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(10, author="alice")])
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],
@@ -629,8 +629,8 @@ def test_diversity_harvest_different_authors_all_pass(tmp_path):
     tracker = DiversityTracker()
 
     prs = [_make_fake_pr(i, author=f"user{i}") for i in range(1, 4)]
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, prs)
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],
@@ -647,8 +647,8 @@ def test_diversity_harvest_tracker_updated_after_save(tmp_path):
     config = DiversityConfig(max_prs_per_author=2)
     tracker = DiversityTracker()
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(1, author="alice")])
         harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],
@@ -672,8 +672,8 @@ def test_diversity_harvest_existing_files_count_against_limits(tmp_path):
     assert tracker.author_counts["alice"] == 2
 
     # PR #3 is new but alice is already at the cap
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(3, author="alice")])
         new_count, skipped = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],
@@ -687,8 +687,8 @@ def test_diversity_harvest_existing_files_count_against_limits(tmp_path):
 
 def test_diversity_harvest_no_config_unchanged_behavior(tmp_path):
     # Without diversity args, harvest_repo behaves exactly as before
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(99, author="alice")], search_total=1)
         new_count, _ = harvest_repo("owner/repo", "token", tmp_path, states=["closed"])
 
@@ -700,8 +700,8 @@ def test_diversity_harvest_exclude_author(tmp_path):
     config = DiversityConfig(exclude_authors=["spammer"])
     tracker = DiversityTracker()
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(5, author="spammer")])
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],
@@ -716,8 +716,8 @@ def test_diversity_harvest_exclude_bot_author(tmp_path):
     config = DiversityConfig(exclude_bot_authors=True)
     tracker = DiversityTracker()
 
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, [_make_fake_pr(6, author="renovate[bot]")])
         new_count, _ = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],
@@ -737,8 +737,8 @@ def test_diversity_harvest_mixed_authors_caps_correctly(tmp_path):
         _make_fake_pr(2, author="alice"),  # should be capped
         _make_fake_pr(3, author="bob"),
     ]
-    with patch("pr_triage.harvest.Github") as mock_gh, \
-         patch("pr_triage.harvest._fetch_diff", return_value=None):
+    with patch("ai_slop_detector.harvest.Github") as mock_gh, \
+         patch("ai_slop_detector.harvest._fetch_diff", return_value=None):
         _setup_mock_gh(mock_gh, prs)
         new_count, skipped = harvest_repo(
             "owner/repo", "token", tmp_path, states=["closed"],

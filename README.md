@@ -1,45 +1,111 @@
-# pr-triage
+# ai-slop-detector
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-78%25-yellow.svg)](#development)
-[![Status](https://img.shields.io/badge/status-v0.3.0-blue.svg)](#current-phase-status)
+[![Status](https://img.shields.io/badge/status-v1.0.0-blue.svg)](#eval-results)
 
-A CLI tool (and planned GitHub Action) that flags AI-slop pull requests using a multi-critic LangGraph pipeline with RAG. Built to help OSS maintainers handle the surge of low-effort, AI-generated PRs.
+A GitHub Action that flags AI-slop pull requests on open, using a two-critic LangGraph pipeline with RAG over the target repo. Built to help OSS maintainers handle the surge of low-effort, AI-generated PRs.
 
-## What this is
+The Action runs once per PR at `on: pull_request: [opened, reopened]`. If the verdict is `is_slop=true`, it posts one idempotent comment naming the deciding factors. If the verdict is `is_slop=false`, it stays silent by default. The classifier is binary and intentional — at PR-open time, maintainer comments, CI timing, and merge status don't exist, so anything granular beyond "this looks like slop" would be guesswork.
 
-Binary slop classifier for pull requests. `pr-triage check <owner/repo> <pr_number>` fetches a PR from GitHub, retrieves project context from a per-repo ChromaDB index, classifies the PR size, runs two critics in parallel (`architecture_critic`, `slop_signals_critic`), and emits one of two verdicts:
+## 60-second install
 
-- `approve` — not slop. Maintainers review as normal.
-- `reject` — looks like AI slop. Maintainers can close or ask the author to revise.
+Drop this into `.github/workflows/ai-slop-detector.yml` in your repo:
 
-The Action is designed to fire **once** per PR at `on: pull_request: [opened, reopened]`. At that moment maintainer comments, CI timing, and merge status don't exist yet — the critics judge from PR content + author signals + heuristics + RAG only ("first-look mode").
+```yaml
+name: AI-slop check
 
-## Phase 3 deliverables
+on:
+  pull_request:
+    types: [opened, reopened]
 
-- **50-entry golden set** — 10 slop, 40 not-slop, spanning 8 repos (ruff, pydantic, poetry, godot, Home Assistant, ghostty, curl, tldraw). `is_slop: bool` is the label on every fixture.
-- **Two critics in parallel** — `architecture_critic` (over-engineering, AI-explanatory docstrings, wrong-arch-layer) + `slop_signals_critic` (AI footer, drive-by overreach, manipulative @-mention, AI-checklist theatre, sibling-repo mismatch, heuristic features). LangGraph fan-out/fan-in with `operator.add` reducer.
-- **Deterministic binary aggregator** — weighted score (slop 0.6, arch 0.4), veto rule (any critic ≤ 3 caps overall at 3), single `_SLOP_THRESHOLD = 5.0`. Output: `approve` or `reject`.
-- **`pr-triage eval`** — runs the pipeline against the golden set, emits binary precision/recall/F1 on the slop class plus a per-golden-class breakdown.
-- **`pr-triage view`** — Streamlit eval viewer. Shows slop precision/recall/F1, binary confusion matrix, and a disagreements table split into false positives and false negatives.
-- **`pr-triage label`** — Streamlit manual labeling tool. Binary verdict: 🗑️ Slop or ✅ Not slop. Output writes `{"repo", "pr_number", "is_slop"}` to `data/golden_labels.jsonl`.
-- **`pr-triage prelabel` / `harvest`** — automated harvest and heuristic pre-labeling pipeline. `prelabel` emits `{is_slop_likely, confidence, signals}` for each candidate.
-- **`pr-triage golden-build`** — CLI builder; validates min slop / not-slop counts; writes `is_slop` into every fixture.
-- **Dollar cost guardrail** — `MAX_EVAL_COST_USD` in `.env` stops the eval loop before it exceeds budget.
-- **Cost tracking** — `ClaudeClient.total_cost_usd`; printed after every eval run.
+permissions:
+  pull-requests: write
+  contents: read
 
-**Eval results (2026-05-16, first-look mode, full 50-entry golden set, Sonnet):**
+jobs:
+  ai-slop-detector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Tomislav-Sola/ai-slop-detector@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+Set repository secret `ANTHROPIC_API_KEY` to an Anthropic key you control. Cost is billed to that key — roughly **$0.03 per PR** in Anthropic spend, plus ~30-60 seconds of per-invocation indexing time.
+
+Optional inputs:
+
+| Input | Default | Effect |
+|---|---|---|
+| `verbose` | `"false"` | Set `"true"` to also comment on PRs that look clean. Default is silent on clean to avoid notification fatigue. |
+| `max_tokens` | `"50000"` | Per-run Anthropic token budget cap. The pipeline refuses to start above this estimate. |
+
+## What gets posted
+
+On a PR the model judges as slop:
+
+```markdown
+## 🤖 ai-slop-detector: this PR looks like AI slop
+
+Weighted score 3.0/10 → slop (reject). Critics: architecture_critic=3, slop_signals_critic=4.
+
+Critic scores
+- architecture_critic: 3/10
+- slop_signals_critic: 4/10
+
+Top deciding factors
+- AI-generated footer detected at end of PR description
+- Vague description: "improves the codebase" with no specifics
+- Drive-by overreach: 12 files touched in unrelated areas
+
+[How the score is computed →]
+
+This is an automated first-look signal, not a review. The model can be wrong and is
+intentionally biased toward catching slop, so some false positives land on legitimate
+PRs whose diffs carry slop-adjacent patterns. Make your own call.
+```
+
+Re-running the Action edits the same comment in place via a hidden HTML marker — it never stacks duplicate comments.
+
+## Eval results
+
+Measured on a 50-entry golden set (10 slop / 40 not-slop, sampled across 8 repos: ruff, pydantic, poetry, godot, Home Assistant, ghostty, curl, tldraw). Sonnet, first-look mode (no post-hoc signals).
 
 | Metric | Value |
 |---|---|
-| Slop precision | **0.714** (10 TP / 14 flagged) |
+| Slop precision | **0.714** (10 true positives / 14 flagged) |
 | Slop recall | **1.000** (10/10 slop caught) |
 | Slop F1 | **0.833** |
 | Accuracy | 92.0% (46/50) |
 | Cost per PR | ~$0.025–0.035 |
 
-**All 10 slop PRs are caught with no false positives on clearly-accepted PRs.** The 4 false positives are on `is_slop=False` entries whose diffs carry slop-adjacent content (over-engineered patches, AI-style docstrings, drive-by overreach). The model can't see the maintainer's design reasoning but does see the slop-style content — so these FPs still surface PRs worth a closer look, not arbitrary noise.
+**All 10 slop PRs were caught with zero false positives on clearly-accepted PRs.** The 4 false positives all land on `is_slop=False` entries whose diffs carry slop-adjacent content — over-engineered patches, AI-style docstrings, drive-by overreach. The model can't see the maintainer's design reasoning but does see the slop-style content. Those FPs are still PRs worth a second look, not arbitrary noise.
+
+## Limitations
+
+Read this section before installing.
+
+- **Golden set is small.** 50 entries is enough to detect catastrophic regressions during development but not to make confident claims about behaviour on long-tail repos. Plan to revisit the eval as it grows.
+- **English-only sample.** All 8 source repos have English-language PR descriptions and CONTRIBUTING.md files. Multilingual repos are unmeasured territory.
+- **Single-labeler ground truth.** The `is_slop` labels were assigned by one maintainer (the author). Inter-annotator agreement is therefore not measured.
+- **Slop is a signal, not a verdict.** A flagged PR still needs a maintainer to decide. Precision of 0.714 means roughly **3 of every 10 flagged PRs are not actually slop** — they're PRs whose content reads slop-adjacent. Use the comment as a "look at this one first," not as a close button.
+- **Cost is yours.** The Action calls Anthropic with the key in your repository secret. ~$0.03/PR adds up on a high-traffic repo.
+- **No post-hoc signals.** First-look mode is intentional. Close timing, maintainer review comments, and CI status are not used by the critics — they don't exist when the Action fires. This is a structural ceiling on precision at PR-open; some slop is only legible after the maintainer engages.
+- **RAG runs at invocation time.** Each Action run indexes the target repo's CONTRIBUTING.md, AGENTS.md, and 50 most-recent merged PR titles + bodies into an ephemeral ChromaDB collection. Adds ~30-60s of cold-start to each run; matches the eval baseline.
+
+## vs other tools
+
+Different scope and different mechanism — comparison is meant to help you pick, not to position this above either.
+
+| Tool | Scope | LLM-backed | Cost | Best for |
+|---|---|---|---|---|
+| **ai-slop-detector** (this) | Binary slop filter at PR-open | Yes (Claude Sonnet) | ~$0.03/PR | Filtering low-effort AI submissions before review |
+| CodeRabbit | Full code review | Yes | Paid SaaS | Replacing or augmenting human review with continuous feedback |
+| Coolify Anti-Slop Action | Heuristic slop filter | No (regex / pattern matching) | Free | Fast, deterministic detection of obvious AI footers and markers |
+
+If you want a reviewer, use CodeRabbit. If you want zero-cost detection of the most obvious tells (AI disclosure footers, generic copy-pasted descriptions), use Coolify's heuristic action. If you want an LLM-augmented filter that catches subtler patterns like wrong-arch-layer over-engineering and drive-by overreach, this is what you're looking at.
 
 ## How scoring works
 
@@ -61,124 +127,98 @@ The aggregator combines the two critic scores deterministically:
 - **Score < 5.0** → `reject` (slop, flagged for the maintainer)
 - **Veto rule**: any critic ≤ **3** caps the overall score at **3** → automatic reject. One strong slop signal from either critic alone forces a slop verdict.
 
-Thresholds live in `src/pr_triage/aggregator.py` as `_SLOP_THRESHOLD`, `_VETO_THRESHOLD`, and `_VETO_CAP`. Critic weights live in `_DEFAULT_WEIGHTS`. The same legend is available in the eval viewer under the Disagreements section.
+Thresholds live in `src/ai_slop_detector/aggregator.py` as `_SLOP_THRESHOLD`, `_VETO_THRESHOLD`, and `_VETO_CAP`. Critic weights live in `_DEFAULT_WEIGHTS`.
 
-## Phase 2 deliverables
+## Architecture
 
-- `ClaudeClient` — real Anthropic SDK calls, model routing (Sonnet for critics, Haiku for classification), tenacity retry on 429 / 5xx / connection errors, per-run token budget cap
-- `RAGIndex` — ChromaDB persistent store at `data/chroma/`, sentence-transformers `all-MiniLM-L6-v2` embeddings, 800-1000 char paragraph chunks with heading prefix, per-repo indexing
-- LangGraph pipeline — `ingest_pr → classify_size → retrieve_context → guidelines_critic → emit_verdict`
-- CLI — `pr-triage check`, `pr-triage index`, global `--fake` flag for offline replay from `tests/fixtures/llm/`
-- `--json` flag on `check` emits the full `TriageState` (consumed by Phase 4 GitHub Action)
-- 91 tests (87% coverage; remaining gaps are live-API paths — GitHub, Anthropic, ChromaDB)
+```
+ingest_pr → classify_size → retrieve_context
+                              ├─ architecture_critic ─┐
+                              └─ slop_signals_critic ─┴→ aggregate → verdict
+```
 
-## Phase 1 deliverables
+- **`architecture_critic`** flags over-engineering, AI-explanatory docstrings, and wrong-arch-layer placement.
+- **`slop_signals_critic`** flags AI-disclosure footers, drive-by overreach, manipulative @-mentions, AI-checklist theatre, sibling-repo mismatch, and heuristic features (duplicate-line ratio, long-function count, debug-print count, etc.).
+- **Aggregator** is deterministic — weighted score plus the veto rule above. No third critic, no model in the loop after the two parallel calls.
+- Both critics run **in parallel** within one LangGraph superstep via `operator.add` on the reducer. Sonnet for both critics in production; Haiku for `classify_size` (cheap classification).
 
-- GitHub PR ingestion via PyGithub
-- `TriageState` Pydantic model
-- `ClaudeClient` gateway (stub in Phase 1, real in Phase 2)
-- Per-run token budget cap via `ContextVar`
-- CLI: `pr-triage fetch <owner/repo> <pr_number>` prints full JSON
-- Pytest suite with `--fake` mode
+<details>
+<summary>Package layout</summary>
 
-## Non-goals
+```
+src/ai_slop_detector/
+├── cli.py                  # Typer CLI: fetch, check, index, eval, view, label, harvest, prelabel, golden-build
+├── action_entrypoint.py    # GitHub Action entry point (Docker)
+├── github_client.py        # PyGithub wrapper; fetch_pr, fetch_repo_context
+├── claude_client.py        # Single gateway for Anthropic SDK calls; tracks cost_usd
+├── state.py                # TriageState + Pydantic models
+├── budget.py               # Per-run token budget via ContextVar + BudgetExceeded
+├── rag.py                  # ChromaDB index + sentence-transformers retrieval
+├── harvest.py              # Candidate PR harvesting with diversity constraints
+├── prelabel.py             # Heuristic pre-labeling pipeline
+├── aggregator.py           # Deterministic binary aggregator (veto rule, threshold)
+├── golden.py               # Golden fixture builder + validator
+├── eval.py                 # Eval harness — runs pipeline against golden set
+├── labeler_app.py          # Streamlit manual labeling tool
+├── eval_viewer_app.py      # Streamlit eval results viewer
+└── graph/
+    ├── nodes.py            # LangGraph node functions
+    └── pipeline.py         # StateGraph assembly, run_pipeline, budget pre-check
+tests/
+└── fixtures/
+    ├── golden/             # 50-entry golden set (one JSON per PR + manifest)
+    └── llm/                # Recorded LLM response sequences for --fake mode
+```
+</details>
 
-- Not a general-purpose code review tool
-- No GitHub Action packaging yet (Phase 4)
+## CLI usage
 
-## Current phase status
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 1 | Done | Repo skeleton, GitHub ingestion, CLI |
-| 2 | Done | LangGraph critic pipeline, RAG, single guidelines critic |
-| 3 | Done | Binary slop classifier end-to-end (pipeline + prelabel + labeler + eval viewer + golden set + eval harness) |
-| 4 | Planned | GitHub Action packaging (action.yml, marketplace) |
-
-## Usage
+The CLI is what you'd use to debug a specific PR or extend the golden set. The Action does not require it.
 
 ```bash
-# Install
-pip install -e ".[dev]"
+# Install in editable mode
+pip install -e ".[dev,eval]"
 
-# Credentials — shell environment variables take priority.
-# .env (if present) provides fallback values for variables not set in the shell.
-cp .env.example .env   # fill in your tokens, never commit .env
+# Run the pipeline against a single PR
+ai-slop-detector check owner/repo 42
+ai-slop-detector check owner/repo 42 --json        # full TriageState
+ai-slop-detector --fake check owner/repo 42        # replay cached LLM responses
 
-# Index a repo's guidelines and recent PR history into ChromaDB
-# (downloads all-MiniLM-L6-v2 on first run, ~90 MB)
-pr-triage index owner/repo
+# Index a repo manually (the Action does this automatically per invocation)
+ai-slop-detector index owner/repo
 
-# Run the triage critic on a PR
-pr-triage check owner/repo 42
+# Run the eval suite (Sonnet, ~$1.50 for the 50-entry golden set)
+ai-slop-detector eval
+ai-slop-detector eval --model haiku                # cheap iteration, ~$0.30
 
-# JSON output — full TriageState, useful for scripting or Phase 4
-pr-triage check owner/repo 42 --json
+# Browse eval results
+ai-slop-detector view outputs/eval_runs/<run_id>.json
 
-# Dry-run without API calls — replays cached LLM responses
-pr-triage --fake check owner/repo 42
-
-# Raise the token budget cap (default 50 000)
-pr-triage check owner/repo 42 --max-tokens 100000
-
-# Run eval against the golden set (Sonnet, ~$1.50 for the full 50 — production-quality)
-pr-triage eval
-
-# Cheap iteration with Haiku (~$0.30) — for fast feedback during prompt tweaks
-pr-triage eval --model haiku
-
-# Browse eval results in Streamlit
-pr-triage view outputs/eval_runs/<run_id>.json
-
-# Harvest candidate PRs from a repo
-pr-triage harvest owner/repo --max-prs 50
-
-# Heuristic pre-labeling of harvested candidates
-pr-triage prelabel outputs/candidates/<repo>.jsonl
-
-# Build a golden fixture from a labeled candidate
-pr-triage golden-build outputs/candidates/<repo>.jsonl --pr <number>
-
-# Open the manual labeling UI
-pr-triage label outputs/candidates/<repo>.jsonl
-
-# Phase 1: just fetch and inspect the raw state
-pr-triage fetch owner/repo 42
+# Golden-set extension flow: harvest → prelabel → label → golden-build
+ai-slop-detector harvest owner/repo --max-prs 50
+ai-slop-detector prelabel
+ai-slop-detector label data/pre_labels_v2.jsonl
+ai-slop-detector golden-build
 ```
+
+`ANTHROPIC_API_KEY` and `GITHUB_TOKEN` come from your shell environment. `.env` provides fallbacks for any variable not set in the shell.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # unit + fake-mode tests, no live credentials needed
-pytest --fake             # same, explicit flag
-pytest --cov=src/pr_triage --cov-report=term-missing
+pytest                    # fake-mode by default — no live credentials needed
+pytest --cov=src/ai_slop_detector --cov-report=term-missing
 ```
 
-`pytest-cov` is included in the `dev` extra.
+## Contributing
 
-## Project structure
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, how to run the eval, how to propose a new golden-set fixture, and the conventional-commit style this repo uses.
 
-```
-src/pr_triage/
-├── cli.py              # Typer entry point: fetch, check, index, eval, view, label, ...
-├── github_client.py    # PyGithub wrapper; fetch_pr, fetch_repo_context
-├── claude_client.py    # Claude API gateway — real SDK + fake replay mode + cost tracking
-├── state.py            # TriageState and Pydantic models
-├── budget.py           # Token budget ContextVar
-├── rag.py              # ChromaDB index + sentence-transformers retrieval
-├── harvest.py          # Candidate PR harvesting with diversity constraints
-├── prelabel.py         # Heuristic pre-labeling pipeline
-├── aggregator.py       # Deterministic multi-critic aggregator
-├── golden.py           # Golden fixture builder
-├── eval.py             # Eval harness — runs pipeline against golden set
-├── labeler_app.py      # Streamlit manual labeling tool
-├── eval_viewer_app.py  # Streamlit eval results viewer
-└── graph/
-    ├── nodes.py        # LangGraph node functions (classify + 2 critics + aggregate)
-    └── pipeline.py     # StateGraph assembly, run_pipeline(), budget pre-check
-tests/
-└── fixtures/
-    ├── golden/                            # 50-entry golden set (JSON per PR, is_slop labels)
-    └── llm/                                # Recorded LLM response sequences for --fake mode
-```
+## Sister project
+
+`papertriage` — same multi-critic LangGraph pattern applied to academic paper triage instead of PR slop. Different domain, same architectural shape (parallel critics + deterministic aggregator).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

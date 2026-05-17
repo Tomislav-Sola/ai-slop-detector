@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING
 
 from langgraph.graph import END, StateGraph
 
-from pr_triage import budget as _budget
-from pr_triage.budget import BudgetExceeded
-from pr_triage.graph.nodes import (
+from ai_slop_detector import budget as _budget
+from ai_slop_detector.budget import BudgetExceeded
+from ai_slop_detector.graph.nodes import (
     aggregate_node,
     architecture_critic_node,
     classify_size_node,
@@ -14,11 +14,11 @@ from pr_triage.graph.nodes import (
     retrieve_context_node,
     slop_signals_critic_node,
 )
-from pr_triage.state import TriageState
+from ai_slop_detector.state import TriageState
 
 if TYPE_CHECKING:
-    from pr_triage.claude_client import ClaudeClient
-    from pr_triage.rag import RAGIndex
+    from ai_slop_detector.claude_client import ClaudeClient
+    from ai_slop_detector.rag import RAGIndex
 
 _DEFAULT_MAX_TOKENS = 50_000
 

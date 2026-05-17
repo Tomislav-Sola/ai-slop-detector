@@ -1,7 +1,7 @@
 """Eval harness for the multi-critic triage pipeline (Phase 3 / B5).
 
 Usage:
-    pr-triage eval [--ablation critic_name] [--limit N] [--golden-dir PATH]
+    ai-slop-detector eval [--ablation critic_name] [--limit N] [--golden-dir PATH]
 
 Loads every golden fixture, reconstructs a TriageState, runs the pipeline
 (real LLM or fake mode), and computes precision / recall / F1 per class plus
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from pr_triage.state import (
+from ai_slop_detector.state import (
     CriticOutput,
     PRMetadata,
     TriageState,
@@ -169,10 +169,10 @@ def run_eval(
     Defaults to MODEL_SONNET so the headline numbers match the production model
     used by the GitHub Action. Pass MODEL_HAIKU for cheap iteration.
     """
-    from pr_triage.aggregator import aggregate
-    from pr_triage.claude_client import MODEL_SONNET, ClaudeClient
-    from pr_triage.graph.pipeline import run_pipeline
-    from pr_triage.rag import RAGIndex
+    from ai_slop_detector.aggregator import aggregate
+    from ai_slop_detector.claude_client import MODEL_SONNET, ClaudeClient
+    from ai_slop_detector.graph.pipeline import run_pipeline
+    from ai_slop_detector.rag import RAGIndex
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:

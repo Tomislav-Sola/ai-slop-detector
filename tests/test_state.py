@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from pr_triage.state import CriticOutput, PRMetadata, TriageState, Verdict
+from ai_slop_detector.state import CriticOutput, PRMetadata, TriageState, Verdict
 
 
 def _make_metadata(**overrides) -> PRMetadata:

@@ -4,10 +4,10 @@ This directory contains the golden test fixtures used by the eval harness for th
 
 ## How entries are created
 
-1. **Harvest** candidate PRs with `pr-triage harvest <owner/repo> --out-dir data/candidates/`
-2. **Pre-label** heuristically with `pr-triage prelabel`. Each output row carries `{is_slop_likely, confidence, signals}`.
+1. **Harvest** candidate PRs with `ai-slop-detector harvest <owner/repo> --out-dir data/candidates/`
+2. **Pre-label** heuristically with `ai-slop-detector prelabel`. Each output row carries `{is_slop_likely, confidence, signals}`.
 3. **Review** pre-labels in the Streamlit labeler. Each saved row in `data/golden_labels.jsonl` is `{repo, pr_number, is_slop}` (or `{skip: true}` for skips).
-4. **Build** final fixtures with `pr-triage golden-build`.
+4. **Build** final fixtures with `ai-slop-detector golden-build`.
 
 ## Requirements
 

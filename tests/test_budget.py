@@ -1,6 +1,6 @@
 import pytest
 
-from pr_triage.budget import BudgetContext, BudgetExceeded, consume, get_budget, set_budget
+from ai_slop_detector.budget import BudgetContext, BudgetExceeded, consume, get_budget, set_budget
 
 
 def test_budget_context_consume_within_limit():
@@ -37,7 +37,7 @@ def test_consume_helper_deducts_from_context_var():
 
 def test_consume_noop_when_no_budget_set():
     # ContextVar isolation: reset by setting to None
-    from pr_triage.budget import _budget_var
+    from ai_slop_detector.budget import _budget_var
     _budget_var.set(None)
     consume(9999)  # should not raise
 

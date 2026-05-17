@@ -3,8 +3,8 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pr-triage"
-version = "0.3.0"
+name = "ai-slop-detector"
+version = "1.0.0"
 description = "Multi-agent binary AI-slop classifier for pull requests. Built for OSS maintainers."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -56,12 +56,12 @@ eval = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Tomislav-Sola/pr-triage"
-Repository = "https://github.com/Tomislav-Sola/pr-triage"
-Issues = "https://github.com/Tomislav-Sola/pr-triage/issues"
+Homepage = "https://github.com/Tomislav-Sola/ai-slop-detector"
+Repository = "https://github.com/Tomislav-Sola/ai-slop-detector"
+Issues = "https://github.com/Tomislav-Sola/ai-slop-detector/issues"
 
 [project.scripts]
-pr-triage = "pr_triage.cli:app"
+ai-slop-detector = "ai_slop_detector.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
