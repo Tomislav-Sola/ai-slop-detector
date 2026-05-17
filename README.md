@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-78%25-yellow.svg)](#development)
-[![Status](https://img.shields.io/badge/status-v1.1.0-blue.svg)](#eval-results)
+[![Status](https://img.shields.io/badge/status-v1.1.1-blue.svg)](#eval-results)
 
 A GitHub Action that flags AI-slop pull requests on open, using a two-critic LangGraph pipeline with RAG over the target repo. Built to help OSS maintainers handle the surge of low-effort, AI-generated PRs.
 
