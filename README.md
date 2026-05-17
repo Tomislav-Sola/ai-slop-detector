@@ -215,10 +215,6 @@ pytest --cov=src/ai_slop_detector --cov-report=term-missing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, how to run the eval, how to propose a new golden-set fixture, and the conventional-commit style this repo uses.
 
-## Sister project
-
-`papertriage` — same multi-critic LangGraph pattern applied to academic paper triage instead of PR slop. Different domain, same architectural shape (parallel critics + deterministic aggregator).
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
