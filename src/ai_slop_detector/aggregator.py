@@ -100,7 +100,10 @@ def aggregate(
     for output in present.values():
         if output.details and hasattr(output.details, "findings"):
             for f in output.details.findings:
-                all_findings.append((severity_order.get(f.severity, 9), f.evidence[:120]))
+                # Full evidence string — consumers display it (GitHub Action
+                # comment, eval viewer); pre-truncating here once clipped finding
+                # sentences mid-word in PR comments.
+                all_findings.append((severity_order.get(f.severity, 9), f.evidence))
     all_findings.sort(key=lambda x: x[0])
     seen: set[str] = set()
     for _, evidence in all_findings[:5]:
