@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pr_triage.github_client import GitHubClient
-from pr_triage.state import TriageState
+from ai_slop_detector.github_client import GitHubClient
+from ai_slop_detector.state import TriageState
 
 
 def _make_mock_repo_and_pr(fixture: dict) -> tuple[MagicMock, MagicMock]:
@@ -71,9 +71,9 @@ def fake_github_client(papertriage_pr9):
     """GitHubClient with PyGithub patched using fixture data."""
     mock_repo, _ = _make_mock_repo_and_pr(papertriage_pr9)
 
-    with patch("pr_triage.github_client.Github") as mock_gh_class:
+    with patch("ai_slop_detector.github_client.Github") as mock_gh_class:
         mock_gh_class.return_value.get_repo.return_value = mock_repo
-        with patch("pr_triage.github_client._fetch_diff") as mock_diff:
+        with patch("ai_slop_detector.github_client._fetch_diff") as mock_diff:
             mock_diff.return_value = papertriage_pr9["raw_diff"]
             yield GitHubClient(token="fake-token"), papertriage_pr9
 
@@ -155,9 +155,9 @@ def test_fetch_pr_contributing_md_present(papertriage_pr9):
 
     mock_repo.get_contents.side_effect = get_contents
 
-    with patch("pr_triage.github_client.Github") as mock_gh_class:
+    with patch("ai_slop_detector.github_client.Github") as mock_gh_class:
         mock_gh_class.return_value.get_repo.return_value = mock_repo
-        with patch("pr_triage.github_client._fetch_diff", return_value=None):
+        with patch("ai_slop_detector.github_client._fetch_diff", return_value=None):
             client = GitHubClient(token="fake-token")
             state = client.fetch_pr(papertriage_pr9["repo"], papertriage_pr9["pr_number"])
 
@@ -192,9 +192,9 @@ def test_author_prior_prs_excludes_current_pr(papertriage_pr9):
 
     mock_repo.get_pulls.side_effect = get_pulls_side_effect
 
-    with patch("pr_triage.github_client.Github") as mock_gh_class:
+    with patch("ai_slop_detector.github_client.Github") as mock_gh_class:
         mock_gh_class.return_value.get_repo.return_value = mock_repo
-        with patch("pr_triage.github_client._fetch_diff", return_value=None):
+        with patch("ai_slop_detector.github_client._fetch_diff", return_value=None):
             client = GitHubClient(token="fake-token")
             state = client.fetch_pr(papertriage_pr9["repo"], papertriage_pr9["pr_number"])
 

@@ -7,7 +7,7 @@ that's RQ territory which we explicitly do not attempt to predict at PR-open tim
 """
 from __future__ import annotations
 
-from pr_triage.state import AggregateResult, CriticOutput
+from ai_slop_detector.state import AggregateResult, CriticOutput
 
 # Critic weights must sum to 1.0. Binary slop-detection pipeline uses two critics.
 _DEFAULT_WEIGHTS: dict[str, float] = {

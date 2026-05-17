@@ -2,15 +2,15 @@
 
 This directory contains the golden test fixtures used by the eval harness.
 Each `.json` file is a PR candidate annotated with `is_slop: bool`.
-`manifest.json` is generated automatically by `pr-triage golden-build`.
+`manifest.json` is generated automatically by `ai-slop-detector golden-build`.
 
 ## Construction pipeline
 
 ```
-pr-triage harvest <repos> --out-dir data/golden_candidates_v2/
-pr-triage prelabel             →  data/pre_labels_v2.jsonl
-pr-triage label                →  (manual review via Streamlit)  →  data/golden_labels.jsonl
-pr-triage golden-build         →  tests/fixtures/golden/
+ai-slop-detector harvest <repos> --out-dir data/golden_candidates_v2/
+ai-slop-detector prelabel             →  data/pre_labels_v2.jsonl
+ai-slop-detector label                →  (manual review via Streamlit)  →  data/golden_labels.jsonl
+ai-slop-detector golden-build         →  tests/fixtures/golden/
 ```
 
 ## Current set
@@ -85,7 +85,7 @@ per-(author, repo) limits so no single prolific contributor dominates.
 
 ## How to extend
 
-1. `pr-triage harvest <owner/repo> --out-dir data/golden_candidates_v2/`
-2. `pr-triage prelabel`
-3. `pr-triage label`
-4. `pr-triage golden-build`
+1. `ai-slop-detector harvest <owner/repo> --out-dir data/golden_candidates_v2/`
+2. `ai-slop-detector prelabel`
+3. `ai-slop-detector label`
+4. `ai-slop-detector golden-build`

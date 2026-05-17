@@ -1,6 +1,6 @@
-"""Streamlit eval viewer — pr-triage view.
+"""Streamlit eval viewer — ai-slop-detector view.
 
-Launch via:  pr-triage view  [--run path/to/run.json]
+Launch via:  ai-slop-detector view  [--run path/to/run.json]
 
 Binary slop classifier view: summary metrics on the slop class (precision,
 recall, F1), 2x2 confusion matrix, and a disagreements table split into
@@ -16,8 +16,8 @@ import streamlit as st
 
 _DEFAULT_RUN_DIR = Path("outputs/eval_runs")
 
-st.set_page_config(page_title="pr-triage eval viewer", layout="wide")
-st.title("pr-triage — Eval Run Viewer")
+st.set_page_config(page_title="ai-slop-detector eval viewer", layout="wide")
+st.title("ai-slop-detector — Eval Run Viewer")
 
 
 # ------------------------------------------------------------------
@@ -30,7 +30,7 @@ if run_path_env and Path(run_path_env).exists():
 else:
     runs = sorted(_DEFAULT_RUN_DIR.glob("*.json"), reverse=True) if _DEFAULT_RUN_DIR.exists() else []
     if not runs:
-        st.error("No eval runs found. Run `pr-triage eval` first.")
+        st.error("No eval runs found. Run `ai-slop-detector eval` first.")
         st.stop()
     run_path = runs[0]
 

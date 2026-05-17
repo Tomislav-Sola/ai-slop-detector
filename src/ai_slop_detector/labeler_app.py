@@ -1,7 +1,7 @@
 """Streamlit manual labeling tool for golden set construction.
 
-Launch via `pr-triage label` or directly:
-    streamlit run src/pr_triage/labeler_app.py
+Launch via `ai-slop-detector label` or directly:
+    streamlit run src/ai_slop_detector/labeler_app.py
 
 Binary labeling: each PR is is_slop=True or False. The labeler shows the
 prelabel suggestion and lets the human accept or override with one click.
@@ -347,7 +347,7 @@ if idx >= total:
     c1.metric("🗑️ is_slop=True", counts["slop"])
     c2.metric("✅ is_slop=False", counts["not_slop"])
     c3.metric("⏭️ skip", counts["skip"])
-    st.info("Run `pr-triage golden-build` to write the golden fixtures.")
+    st.info("Run `ai-slop-detector golden-build` to write the golden fixtures.")
     if st.button("Restart (re-review skipped PRs)"):
         del st.session_state["initialized"]
         st.rerun()

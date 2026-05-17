@@ -1,4 +1,4 @@
-# CLAUDE.md — pr-triage
+# CLAUDE.md — ai-slop-detector
 
 ## Ground rules
 
@@ -7,8 +7,8 @@
 - Never commit `.env`, `data/`, `outputs/`, `*.db`.
 - `.gitignore` must cover `.env`, `.env.*`, `.coverage`, `outputs/`, `data/`, `*.db`, `.venv/` before any matching file is created.
 - `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` come from shell env — never from repo files.
-- All Claude API calls go through `ClaudeClient` in `src/pr_triage/claude_client.py`. Never instantiate `Anthropic()` elsewhere.
-- Per-run hard token budget cap via `ContextVar` (`src/pr_triage/budget.py`).
+- All Claude API calls go through `ClaudeClient` in `src/ai_slop_detector/claude_client.py`. Never instantiate `Anthropic()` elsewhere.
+- Per-run hard token budget cap via `ContextVar` (`src/ai_slop_detector/budget.py`).
 - Run `pytest` after each meaningful change.
 - Conventional commits: `feat` / `fix` / `chore` / `docs` / `test` / `refactor`.
 - Honest README: no "production-ready", no unmeasured performance claims, no em-dash separators in headings.
@@ -22,7 +22,7 @@
 ## Architecture
 
 ```
-src/pr_triage/
+src/ai_slop_detector/
 ├── cli.py              # Typer entry point
 ├── github_client.py    # PyGithub wrapper — all GitHub I/O
 ├── claude_client.py    # Single gateway for all Claude API calls; tracks cost_usd
@@ -34,8 +34,8 @@ src/pr_triage/
 ├── golden.py           # build_golden_set; validates min slop / not-slop counts
 ├── aggregator.py       # Deterministic binary aggregator (veto rule, _SLOP_THRESHOLD)
 ├── eval.py             # Eval harness: load golden set, run pipeline, binary metrics
-├── labeler_app.py      # Streamlit manual labeling tool (pr-triage label)
-├── eval_viewer_app.py  # Streamlit eval results viewer (pr-triage view)
+├── labeler_app.py      # Streamlit manual labeling tool (ai-slop-detector label)
+├── eval_viewer_app.py  # Streamlit eval results viewer (ai-slop-detector view)
 └── graph/
     ├── nodes.py        # LangGraph node functions (classify + 2 critics + aggregate)
     └── pipeline.py     # StateGraph assembly, run_pipeline(), critic_model override
@@ -44,14 +44,14 @@ src/pr_triage/
 ## Labels
 
 - `is_slop: bool` on every golden fixture and label entry. That is the only label.
-- The labels JSONL written by `pr-triage label` is `{"repo", "pr_number", "is_slop"}` (or `{"skip": true}` for skips).
+- The labels JSONL written by `ai-slop-detector label` is `{"repo", "pr_number", "is_slop"}` (or `{"skip": true}` for skips).
 
 ## Model routing
 
 - `classify_size` → Haiku (always — simple classification)
 - `architecture_critic` → Sonnet (production default)
 - `slop_signals_critic` → Sonnet (production default; Haiku reject recall collapsed to 0.077 in earlier eval)
-- `pr-triage eval` → critics default to Sonnet (matches production); use `--model haiku` for cheap iteration during prompt tweaks
+- `ai-slop-detector eval` → critics default to Sonnet (matches production); use `--model haiku` for cheap iteration during prompt tweaks
 
 ## Phase status
 

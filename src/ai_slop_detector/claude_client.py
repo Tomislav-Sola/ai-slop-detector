@@ -11,7 +11,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from pr_triage import budget as _budget
+from ai_slop_detector import budget as _budget
 
 # Models used by the pipeline
 MODEL_SONNET = "claude-sonnet-4-6"

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from pr_triage.aggregator import aggregate, _VETO_CAP, _VETO_THRESHOLD
-from pr_triage.state import CriticOutput, GuidelinesCriticOutput, GuidelinesFinding
+from ai_slop_detector.aggregator import aggregate, _VETO_CAP, _VETO_THRESHOLD
+from ai_slop_detector.state import CriticOutput, GuidelinesCriticOutput, GuidelinesFinding
 
 
 def _critic(name: str, score: int) -> CriticOutput:

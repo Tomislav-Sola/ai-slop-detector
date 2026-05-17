@@ -7,8 +7,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from pr_triage.cli import app, _fixture_path
-from pr_triage.state import (
+from ai_slop_detector.cli import app, _fixture_path
+from ai_slop_detector.state import (
     CriticOutput,
     GuidelinesCriticOutput,
     GuidelinesFinding,
@@ -112,7 +112,7 @@ def test_fetch_bad_repo_format_error_message():
 def test_fetch_happy_path_exits_zero():
     state = _make_state()
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
-        with patch("pr_triage.cli.GitHubClient") as mock_cls:
+        with patch("ai_slop_detector.cli.GitHubClient") as mock_cls:
             mock_cls.return_value.fetch_pr.return_value = state
             result = runner.invoke(app, ["fetch", "owner/repo", "7"])
     assert result.exit_code == 0
@@ -121,7 +121,7 @@ def test_fetch_happy_path_exits_zero():
 def test_fetch_happy_path_outputs_valid_json():
     state = _make_state()
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
-        with patch("pr_triage.cli.GitHubClient") as mock_cls:
+        with patch("ai_slop_detector.cli.GitHubClient") as mock_cls:
             mock_cls.return_value.fetch_pr.return_value = state
             result = runner.invoke(app, ["fetch", "owner/repo", "7"])
     data = json.loads(result.output)
@@ -133,7 +133,7 @@ def test_fetch_happy_path_outputs_valid_json():
 def test_fetch_happy_path_passes_token_to_client():
     state = _make_state()
     with patch.dict(os.environ, {"GITHUB_TOKEN": "secret-token"}):
-        with patch("pr_triage.cli.GitHubClient") as mock_cls:
+        with patch("ai_slop_detector.cli.GitHubClient") as mock_cls:
             mock_cls.return_value.fetch_pr.return_value = state
             runner.invoke(app, ["fetch", "owner/repo", "7"])
     mock_cls.assert_called_once_with(token="secret-token")
@@ -142,7 +142,7 @@ def test_fetch_happy_path_passes_token_to_client():
 def test_fetch_happy_path_passes_pr_number_to_client():
     state = _make_state()
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}):
-        with patch("pr_triage.cli.GitHubClient") as mock_cls:
+        with patch("ai_slop_detector.cli.GitHubClient") as mock_cls:
             mock_cls.return_value.fetch_pr.return_value = state
             runner.invoke(app, ["fetch", "owner/repo", "7"])
     mock_cls.return_value.fetch_pr.assert_called_once_with("owner/repo", 7)
@@ -184,8 +184,8 @@ def test_check_missing_api_key_error_message():
 
 def test_check_fake_missing_fixture_exits_nonzero():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.cli.GitHubClient") as mock_gh, \
-         patch("pr_triage.cli._fixture_path", return_value=Path("/nonexistent/fixture.json")):
+         patch("ai_slop_detector.cli.GitHubClient") as mock_gh, \
+         patch("ai_slop_detector.cli._fixture_path", return_value=Path("/nonexistent/fixture.json")):
         mock_gh.return_value.fetch_pr.return_value = _make_state()
         result = runner.invoke(app, ["--fake", "check", "owner/repo", "7"])
     assert result.exit_code == 1
@@ -193,10 +193,10 @@ def test_check_fake_missing_fixture_exits_nonzero():
 
 def test_check_fake_happy_path_exits_zero(llm_fixture):
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.cli.GitHubClient") as mock_gh, \
-         patch("pr_triage.rag.RAGIndex"), \
-         patch("pr_triage.cli._fixture_path", return_value=llm_fixture), \
-         patch("pr_triage.graph.pipeline.run_pipeline", return_value=_make_result_state()):
+         patch("ai_slop_detector.cli.GitHubClient") as mock_gh, \
+         patch("ai_slop_detector.rag.RAGIndex"), \
+         patch("ai_slop_detector.cli._fixture_path", return_value=llm_fixture), \
+         patch("ai_slop_detector.graph.pipeline.run_pipeline", return_value=_make_result_state()):
         mock_gh.return_value.fetch_pr.return_value = _make_state()
         result = runner.invoke(app, ["--fake", "check", "owner/repo", "7"])
     assert result.exit_code == 0
@@ -204,10 +204,10 @@ def test_check_fake_happy_path_exits_zero(llm_fixture):
 
 def test_check_fake_human_readable_shows_score(llm_fixture):
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.cli.GitHubClient") as mock_gh, \
-         patch("pr_triage.rag.RAGIndex"), \
-         patch("pr_triage.cli._fixture_path", return_value=llm_fixture), \
-         patch("pr_triage.graph.pipeline.run_pipeline", return_value=_make_result_state()):
+         patch("ai_slop_detector.cli.GitHubClient") as mock_gh, \
+         patch("ai_slop_detector.rag.RAGIndex"), \
+         patch("ai_slop_detector.cli._fixture_path", return_value=llm_fixture), \
+         patch("ai_slop_detector.graph.pipeline.run_pipeline", return_value=_make_result_state()):
         mock_gh.return_value.fetch_pr.return_value = _make_state()
         result = runner.invoke(app, ["--fake", "check", "owner/repo", "7"])
     assert "7/10" in result.output
@@ -217,10 +217,10 @@ def test_check_fake_human_readable_shows_score(llm_fixture):
 def test_check_fake_json_flag_outputs_valid_json(llm_fixture):
     result_state = _make_result_state()
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.cli.GitHubClient") as mock_gh, \
-         patch("pr_triage.rag.RAGIndex"), \
-         patch("pr_triage.cli._fixture_path", return_value=llm_fixture), \
-         patch("pr_triage.graph.pipeline.run_pipeline", return_value=result_state):
+         patch("ai_slop_detector.cli.GitHubClient") as mock_gh, \
+         patch("ai_slop_detector.rag.RAGIndex"), \
+         patch("ai_slop_detector.cli._fixture_path", return_value=llm_fixture), \
+         patch("ai_slop_detector.graph.pipeline.run_pipeline", return_value=result_state):
         mock_gh.return_value.fetch_pr.return_value = _make_state()
         result = runner.invoke(app, ["--fake", "check", "owner/repo", "7", "--json"])
     # CliRunner mixes stderr into output; skip the progress line before the JSON object.
@@ -241,10 +241,10 @@ def test_check_trivial_state_shows_approve(llm_fixture):
         ),
     })
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.cli.GitHubClient") as mock_gh, \
-         patch("pr_triage.rag.RAGIndex"), \
-         patch("pr_triage.cli._fixture_path", return_value=llm_fixture), \
-         patch("pr_triage.graph.pipeline.run_pipeline", return_value=trivial):
+         patch("ai_slop_detector.cli.GitHubClient") as mock_gh, \
+         patch("ai_slop_detector.rag.RAGIndex"), \
+         patch("ai_slop_detector.cli._fixture_path", return_value=llm_fixture), \
+         patch("ai_slop_detector.graph.pipeline.run_pipeline", return_value=trivial):
         mock_gh.return_value.fetch_pr.return_value = _make_state()
         result = runner.invoke(app, ["--fake", "check", "owner/repo", "7"])
     assert "trivial" in result.output.lower()
@@ -269,8 +269,8 @@ def test_index_bad_repo_format_exits_nonzero():
 
 def test_index_happy_path_exits_zero():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.cli.GitHubClient") as mock_gh, \
-         patch("pr_triage.rag.RAGIndex") as mock_rag:
+         patch("ai_slop_detector.cli.GitHubClient") as mock_gh, \
+         patch("ai_slop_detector.rag.RAGIndex") as mock_rag:
         mock_gh.return_value.fetch_repo_context.return_value = {
             "contributing_md": "Use conventional commits.",
             "agents_md": None,
@@ -283,8 +283,8 @@ def test_index_happy_path_exits_zero():
 
 def test_index_happy_path_reports_chunk_count():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.cli.GitHubClient") as mock_gh, \
-         patch("pr_triage.rag.RAGIndex") as mock_rag:
+         patch("ai_slop_detector.cli.GitHubClient") as mock_gh, \
+         patch("ai_slop_detector.rag.RAGIndex") as mock_rag:
         mock_gh.return_value.fetch_repo_context.return_value = {
             "contributing_md": None,
             "agents_md": None,
@@ -322,7 +322,7 @@ def test_harvest_requires_github_token():
 
 def test_harvest_rejects_invalid_repo_format():
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.harvest.estimate_harvest_calls", return_value={"estimated_new": 0, "already_cached": 0}):
+         patch("ai_slop_detector.harvest.estimate_harvest_calls", return_value={"estimated_new": 0, "already_cached": 0}):
         result = runner.invoke(app, ["harvest", "notarepo"])
     assert result.exit_code == 1
     assert "owner/repo" in result.output
@@ -330,7 +330,7 @@ def test_harvest_rejects_invalid_repo_format():
 
 def test_harvest_yes_flag_skips_confirmation(tmp_path):
     with patch.dict(os.environ, {"GITHUB_TOKEN": "fake"}), \
-         patch("pr_triage.harvest.harvest_repo", return_value=(5, 0)) as mock_harvest:
+         patch("ai_slop_detector.harvest.harvest_repo", return_value=(5, 0)) as mock_harvest:
         result = runner.invoke(
             app,
             ["harvest", "owner/repo", "--yes", "--out-dir", str(tmp_path)],
@@ -356,7 +356,7 @@ def test_prelabel_happy_path(tmp_path):
     cand_dir.mkdir()
     out_path = tmp_path / "pre_labels.jsonl"
 
-    with patch("pr_triage.prelabel.prelabel_dir", return_value=7) as mock_pl:
+    with patch("ai_slop_detector.prelabel.prelabel_dir", return_value=7) as mock_pl:
         result = runner.invoke(
             app,
             ["prelabel", "--candidates-dir", str(cand_dir), "--out", str(out_path)],
@@ -371,8 +371,8 @@ def test_prelabel_happy_path(tmp_path):
 # ------------------------------------------------------------------
 
 def test_golden_build_exits_on_error(tmp_path):
-    with patch("pr_triage.golden.build_golden_set") as mock_build:
-        from pr_triage.golden import GoldenBuildError
+    with patch("ai_slop_detector.golden.build_golden_set") as mock_build:
+        from ai_slop_detector.golden import GoldenBuildError
         mock_build.side_effect = GoldenBuildError("missing labels file")
         result = runner.invoke(
             app,
@@ -383,7 +383,7 @@ def test_golden_build_exits_on_error(tmp_path):
 
 
 def test_golden_build_happy_path(tmp_path):
-    with patch("pr_triage.golden.build_golden_set", return_value={
+    with patch("ai_slop_detector.golden.build_golden_set", return_value={
         "total": 30, "is_slop": 5, "not_slop": 25,
     }):
         result = runner.invoke(

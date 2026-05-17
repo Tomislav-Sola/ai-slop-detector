@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pr_triage import budget as _budget
-from pr_triage.claude_client import ClaudeClient, FakeResponsesExhausted
+from ai_slop_detector import budget as _budget
+from ai_slop_detector.claude_client import ClaudeClient, FakeResponsesExhausted
 
 _MESSAGES = [{"role": "user", "content": "Hello"}]
 
@@ -67,7 +67,7 @@ def _mock_message(text: str, input_tokens: int = 100, output_tokens: int = 50) -
 
 def test_live_complete_returns_text():
     _budget.set_budget(10_000)
-    with patch("pr_triage.claude_client.anthropic.Anthropic") as mock_cls:
+    with patch("ai_slop_detector.claude_client.anthropic.Anthropic") as mock_cls:
         mock_cls.return_value.messages.create.return_value = _mock_message("small")
         client = ClaudeClient(api_key="sk-ant-fake")
         result = client.complete(_MESSAGES)
@@ -76,7 +76,7 @@ def test_live_complete_returns_text():
 
 def test_live_complete_tracks_tokens_in_budget():
     _budget.set_budget(10_000)
-    with patch("pr_triage.claude_client.anthropic.Anthropic") as mock_cls:
+    with patch("ai_slop_detector.claude_client.anthropic.Anthropic") as mock_cls:
         mock_cls.return_value.messages.create.return_value = _mock_message("ok", input_tokens=80, output_tokens=40)
         client = ClaudeClient(api_key="sk-ant-fake")
         client.complete(_MESSAGES)
@@ -85,7 +85,7 @@ def test_live_complete_tracks_tokens_in_budget():
 
 def test_live_complete_passes_system_prompt():
     _budget.set_budget(10_000)
-    with patch("pr_triage.claude_client.anthropic.Anthropic") as mock_cls:
+    with patch("ai_slop_detector.claude_client.anthropic.Anthropic") as mock_cls:
         mock_api = mock_cls.return_value
         mock_api.messages.create.return_value = _mock_message("ok")
         client = ClaudeClient(api_key="sk-ant-fake")
@@ -96,7 +96,7 @@ def test_live_complete_passes_system_prompt():
 
 def test_live_complete_omits_system_when_none():
     _budget.set_budget(10_000)
-    with patch("pr_triage.claude_client.anthropic.Anthropic") as mock_cls:
+    with patch("ai_slop_detector.claude_client.anthropic.Anthropic") as mock_cls:
         mock_api = mock_cls.return_value
         mock_api.messages.create.return_value = _mock_message("ok")
         client = ClaudeClient(api_key="sk-ant-fake")
@@ -107,7 +107,7 @@ def test_live_complete_omits_system_when_none():
 
 def test_live_complete_uses_default_model():
     _budget.set_budget(10_000)
-    with patch("pr_triage.claude_client.anthropic.Anthropic") as mock_cls:
+    with patch("ai_slop_detector.claude_client.anthropic.Anthropic") as mock_cls:
         mock_api = mock_cls.return_value
         mock_api.messages.create.return_value = _mock_message("ok")
         client = ClaudeClient(api_key="sk-ant-fake")
@@ -118,7 +118,7 @@ def test_live_complete_uses_default_model():
 
 def test_live_complete_respects_model_override():
     _budget.set_budget(10_000)
-    with patch("pr_triage.claude_client.anthropic.Anthropic") as mock_cls:
+    with patch("ai_slop_detector.claude_client.anthropic.Anthropic") as mock_cls:
         mock_api = mock_cls.return_value
         mock_api.messages.create.return_value = _mock_message("ok")
         client = ClaudeClient(api_key="sk-ant-fake")
@@ -128,6 +128,6 @@ def test_live_complete_respects_model_override():
 
 
 def test_live_complete_construction_does_not_raise():
-    with patch("pr_triage.claude_client.anthropic.Anthropic"):
+    with patch("ai_slop_detector.claude_client.anthropic.Anthropic"):
         client = ClaudeClient(api_key="sk-ant-fake")
     assert client.default_model == "claude-sonnet-4-6"

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pr_triage.prelabel import prelabel_candidate, prelabel_dir
+from ai_slop_detector.prelabel import prelabel_candidate, prelabel_dir
 
 _NOW = datetime.now(tz=timezone.utc)
 _OLD = (_NOW - timedelta(days=30)).isoformat()
@@ -377,7 +377,7 @@ def test_confidence_three_signals_high():
 
 
 def test_confidence_from_count():
-    from pr_triage.prelabel import prelabel_candidate as _fn
+    from ai_slop_detector.prelabel import prelabel_candidate as _fn
     # Verify the stacking rule algebraically via a fabricated 3-signal scenario.
     # Create a candidate where we inject 3 signals by patching the internal list
     # indirectly: use a body with AI keyword + maintainer_explicit phrase in comment

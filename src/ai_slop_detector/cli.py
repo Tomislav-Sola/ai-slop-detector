@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 from dotenv import load_dotenv
 
-from pr_triage.github_client import GitHubClient
+from ai_slop_detector.github_client import GitHubClient
 
 load_dotenv()
 
@@ -76,10 +76,10 @@ def check(
         typer.echo("Error: ANTHROPIC_API_KEY is not set.", err=True)
         raise typer.Exit(1)
 
-    from pr_triage.budget import BudgetExceeded
-    from pr_triage.claude_client import ClaudeClient
-    from pr_triage.graph.pipeline import run_pipeline
-    from pr_triage.rag import RAGIndex
+    from ai_slop_detector.budget import BudgetExceeded
+    from ai_slop_detector.claude_client import ClaudeClient
+    from ai_slop_detector.graph.pipeline import run_pipeline
+    from ai_slop_detector.rag import RAGIndex
 
     gh = GitHubClient(token=token)
     typer.echo(f"Fetching PR #{pr_number} from {repo}…", err=True)
@@ -162,7 +162,7 @@ def harvest(
     state_list = [s.strip() for s in states.split(",") if s.strip()]
     exclude_authors = [a.strip() for a in exclude_authors_csv.split(",") if a.strip()]
 
-    from pr_triage.harvest import (
+    from ai_slop_detector.harvest import (
         DiversityConfig,
         DiversityTracker,
         estimate_harvest_calls,
@@ -238,7 +238,7 @@ def prelabel(
         typer.echo(f"Error: candidates directory not found: {candidates_dir}", err=True)
         raise typer.Exit(1)
 
-    from pr_triage.prelabel import prelabel_dir
+    from ai_slop_detector.prelabel import prelabel_dir
 
     count = prelabel_dir(candidates_dir, out_path, verbose=verbose)
     typer.echo(f"Pre-labeled {count} candidates → {out_path}")
@@ -260,7 +260,7 @@ def golden_build(
     force: bool = typer.Option(False, "--force", help="Write even if class-balance requirements aren't met."),
 ) -> None:
     """Build the golden test fixture set from manual labels + harvested candidates."""
-    from pr_triage.golden import GoldenBuildError, build_golden_set
+    from ai_slop_detector.golden import GoldenBuildError, build_golden_set
 
     candidates_dirs = [Path(p.strip()) for p in candidates_dirs_csv.split(",") if p.strip()]
 
@@ -305,7 +305,7 @@ def label(
     import sys
 
     if not pre_labels.exists():
-        typer.echo(f"Error: {pre_labels} not found. Run `pr-triage prelabel` first.", err=True)
+        typer.echo(f"Error: {pre_labels} not found. Run `ai-slop-detector prelabel` first.", err=True)
         raise typer.Exit(1)
 
     app_path = Path(__file__).parent / "labeler_app.py"
@@ -337,8 +337,8 @@ def eval(
     model: str = typer.Option("sonnet", "--model", help="Model for critics: 'sonnet' (default, production quality) or 'haiku' (cheap iteration)."),
 ) -> None:
     """Run the eval harness against the golden test set and print metrics."""
-    from pr_triage.claude_client import MODEL_HAIKU, MODEL_SONNET
-    from pr_triage.eval import run_eval
+    from ai_slop_detector.claude_client import MODEL_HAIKU, MODEL_SONNET
+    from ai_slop_detector.eval import run_eval
 
     critic_model = MODEL_SONNET if model.lower().startswith("sonnet") else MODEL_HAIKU
     typer.echo(f"Running eval on {golden_dir} (critics: {critic_model})…", err=True)
@@ -390,7 +390,7 @@ def view(
     if run_file is None:
         runs = sorted(out_dir.glob("*.json"), reverse=True)
         if not runs:
-            typer.echo("Error: no eval runs found. Run `pr-triage eval` first.", err=True)
+            typer.echo("Error: no eval runs found. Run `ai-slop-detector eval` first.", err=True)
             raise typer.Exit(1)
         run_file = runs[0]
 
@@ -429,7 +429,7 @@ def index(
         typer.echo("Error: repo must be in owner/repo format.", err=True)
         raise typer.Exit(1)
 
-    from pr_triage.rag import RAGIndex
+    from ai_slop_detector.rag import RAGIndex
 
     typer.echo(f"Fetching repo context for {repo}…", err=True)
     gh = GitHubClient(token=token)
@@ -451,7 +451,7 @@ def index(
 # ------------------------------------------------------------------
 
 def _print_verdict(state) -> None:
-    from pr_triage.state import GuidelinesCriticOutput
+    from ai_slop_detector.state import GuidelinesCriticOutput
 
     verdict = state.aggregate_verdict
     meta = state.metadata
@@ -459,7 +459,7 @@ def _print_verdict(state) -> None:
     typer.echo(f"\nPR #{meta.number} — {meta.title}")
     typer.echo(f"Size: {state.size_classification or 'unknown'}")
 
-    budget = __import__("pr_triage.budget", fromlist=["get_budget"]).get_budget()
+    budget = __import__("ai_slop_detector.budget", fromlist=["get_budget"]).get_budget()
     if budget:
         typer.echo(f"Tokens used: {budget.used:,} / {budget.max_tokens:,}")
 

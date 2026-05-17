@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pr_triage.rag import RAGIndex, _chunk_document, _collection_name, _split_long
+from ai_slop_detector.rag import RAGIndex, _chunk_document, _collection_name, _split_long
 
 
 # ------------------------------------------------------------------
@@ -23,7 +23,7 @@ def rag(tmp_path):
         "sentence_transformers": MagicMock(SentenceTransformer=mock_st),
     }):
         import importlib
-        import pr_triage.rag as rag_mod
+        import ai_slop_detector.rag as rag_mod
         importlib.reload(rag_mod)
         instance = rag_mod.RAGIndex(persist_dir=tmp_path)
         instance._chroma = mock_chroma.PersistentClient.return_value
@@ -46,7 +46,7 @@ def test_rag_retrieve_missing_collection_returns_empty(tmp_path):
         "sentence_transformers": MagicMock(SentenceTransformer=MagicMock()),
     }):
         import importlib
-        import pr_triage.rag as rag_mod
+        import ai_slop_detector.rag as rag_mod
         importlib.reload(rag_mod)
         rag = rag_mod.RAGIndex(persist_dir=tmp_path)
         result = rag.retrieve("owner/repo", "query string")
@@ -66,7 +66,7 @@ def test_rag_index_repo_returns_zero_on_empty_content(tmp_path):
         "sentence_transformers": MagicMock(SentenceTransformer=MagicMock()),
     }):
         import importlib
-        import pr_triage.rag as rag_mod
+        import ai_slop_detector.rag as rag_mod
         importlib.reload(rag_mod)
         rag = rag_mod.RAGIndex(persist_dir=tmp_path)
         count = rag.index_repo("owner/repo", contributing_md=None, agents_md=None, merged_prs=[])
@@ -94,7 +94,7 @@ def test_rag_retrieve_returns_prefixed_chunks(tmp_path):
         "sentence_transformers": MagicMock(SentenceTransformer=mock_st),
     }):
         import importlib
-        import pr_triage.rag as rag_mod
+        import ai_slop_detector.rag as rag_mod
         importlib.reload(rag_mod)
         rag = rag_mod.RAGIndex(persist_dir=tmp_path)
         results = rag.retrieve("owner/repo", "query")

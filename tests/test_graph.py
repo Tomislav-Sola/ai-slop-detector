@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pr_triage.claude_client import ClaudeClient
-from pr_triage.graph.nodes import (
+from ai_slop_detector.claude_client import ClaudeClient
+from ai_slop_detector.graph.nodes import (
     _is_trivial,
     architecture_critic_node,
     classify_size_node,
@@ -17,9 +17,9 @@ from pr_triage.graph.nodes import (
     retrieve_context_node,
     slop_signals_critic_node,
 )
-from pr_triage.graph.pipeline import _check_budget, run_pipeline
-from pr_triage.budget import BudgetExceeded
-from pr_triage.state import PRMetadata, TriageState
+from ai_slop_detector.graph.pipeline import _check_budget, run_pipeline
+from ai_slop_detector.budget import BudgetExceeded
+from ai_slop_detector.state import PRMetadata, TriageState
 
 FIXTURES_LLM = Path(__file__).parent / "fixtures" / "llm"
 
@@ -394,14 +394,14 @@ def test_slop_signals_critic_detects_debug_prints():
         "+print('another debug')\n"
     )
     s = _make_state(raw_diff=diff_with_print)
-    from pr_triage.graph.nodes import _compute_sloppiness_features
+    from ai_slop_detector.graph.nodes import _compute_sloppiness_features
     features = _compute_sloppiness_features(s)
     assert features.debug_print_count == 2
 
 
 def test_slop_signals_critic_detects_todo():
     diff = "+# TODO: fix this later\n+# FIXME: hack alert\n"
-    from pr_triage.graph.nodes import _compute_sloppiness_features
+    from ai_slop_detector.graph.nodes import _compute_sloppiness_features
     s = _make_state(raw_diff=diff)
     features = _compute_sloppiness_features(s)
     assert features.todo_fixme_count == 2
@@ -412,8 +412,8 @@ def test_slop_signals_critic_detects_todo():
 # ------------------------------------------------------------------
 
 def test_aggregate_node_sets_both_fields():
-    from pr_triage.graph.nodes import aggregate_node
-    from pr_triage.state import CriticOutput, GuidelinesCriticOutput
+    from ai_slop_detector.graph.nodes import aggregate_node
+    from ai_slop_detector.state import CriticOutput, GuidelinesCriticOutput
     details = GuidelinesCriticOutput(score=8, findings=[], citations=[])
     critic = CriticOutput(
         critic_name="guidelines_critic", verdict="pass",
