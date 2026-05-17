@@ -25,4 +25,7 @@ inputs:
 
 runs:
   using: "docker"
-  image: "Dockerfile"
+  # Pre-built image from GHCR. Built by .github/workflows/release.yml on every
+  # vX.Y.Z tag push. The :v1 tag floats to the latest v1.x release.
+  # Drops cold-start from ~3-5min (Dockerfile build) to ~30s (image pull).
+  image: "docker://ghcr.io/tomislav-sola/ai-slop-detector:v1"
