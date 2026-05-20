@@ -5,6 +5,10 @@
 [![Coverage](https://img.shields.io/badge/coverage-78%25-yellow.svg)](#development)
 [![Status](https://img.shields.io/badge/status-v1.1.1-blue.svg)](#eval-results)
 
+<p align="center">
+  <img src="docs/images/ai_slop_detector_visual.png" alt="ai-slop-detector pipeline: PR opened → two critics in parallel → aggregator → comment posted" width="900">
+</p>
+
 A GitHub Action that flags AI-slop pull requests on open, using a two-critic LangGraph pipeline with RAG over the target repo. Built to help OSS maintainers handle the surge of low-effort, AI-generated PRs.
 
 The Action runs once per PR at `on: pull_request: [opened, reopened]`. If the verdict is `is_slop=true`, it posts one idempotent comment naming the deciding factors. If the verdict is `is_slop=false`, it stays silent by default. The classifier is binary and intentional — at PR-open time, maintainer comments, CI timing, and merge status don't exist, so anything granular beyond "this looks like slop" would be guesswork.
@@ -44,28 +48,9 @@ Optional inputs:
 
 ## What gets posted
 
-On a PR the model judges as slop:
+Actual comment posted on a PR the model judges as slop (from the smoke-test repo):
 
-```markdown
-## 🤖 ai-slop-detector: this PR looks like AI slop
-
-Weighted score 3.0/10 → slop (reject). Critics: architecture_critic=3, slop_signals_critic=4.
-
-Critic scores
-- architecture_critic: 3/10
-- slop_signals_critic: 4/10
-
-Top deciding factors
-- AI-generated footer detected at end of PR description
-- Vague description: "improves the codebase" with no specifics
-- Drive-by overreach: 12 files touched in unrelated areas
-
-[How the score is computed →]
-
-This is an automated first-look signal, not a review. The model can be wrong and is
-intentionally biased toward catching slop, so some false positives land on legitimate
-PRs whose diffs carry slop-adjacent patterns. Make your own call.
-```
+![Example slop comment as posted on a smoke-test PR](docs/images/slop_comment.png)
 
 Re-running the Action edits the same comment in place via a hidden HTML marker — it never stacks duplicate comments.
 
